@@ -22,7 +22,7 @@ It covers GitHub access, dependencies, connecting the VIO over USB-C, video, liv
 permissions, and the hardware checks that are still open.
 
 ```bash
-git clone --recursive https://github.com/baohuynh2905-del/Mavlink_debug_app.git
+git clone --recursive https://github.com/chillguyonamission/Mavlink_debug_app.git
 cd Mavlink_debug_app
 scripts/build.sh --run        # checks dependencies, builds, runs the tests, starts the app
 ```

@@ -40,7 +40,7 @@ sudo apt install -y build-essential cmake pkg-config \
 ## 3. Clone, build, and run the tests
 
 ```bash
-git clone --recursive https://github.com/baohuynh2905-del/Mavlink_debug_app.git
+git clone --recursive https://github.com/chillguyonamission/Mavlink_debug_app.git
 cd Mavlink_debug_app
 scripts/build.sh
 ```
