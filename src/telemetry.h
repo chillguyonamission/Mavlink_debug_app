@@ -25,6 +25,9 @@ struct GimbalAttitude {
 };
 bool gimbalAttitude(const MavFrame &f, GimbalAttitude *out);  // GIMBAL_DEVICE_ATTITUDE_STATUS only
 
+// Can this PARAM_VALUE type hold the value? It travels as a float, so integers past 2^24 would change on the way.
+bool gimbalParamFits(int mavParamType, double value);
+
 std::optional<double> fieldNumber(const MavFrame &f, const char *name, int index = 0);
 QString fieldText(const MavFrame &f, const char *name);  // char[] fields, without quotes
 
@@ -35,15 +38,21 @@ public:
         double value;
         qint64 monoNs;
     };
+    struct GimbalParam {
+        double value;
+        qint64 monoNs;
+        int index, count, type;  // PARAM_VALUE: param_index, param_count, MAV_PARAM_TYPE
+    };
     static constexpr quint8 kPayloadCore = MAV_COMP_ID_USER2;  // source of the SDK's DEBUG parameter stream
 
     void add(const CapturedFrame &c);
-    void clear() { m_last.clear(); m_params.clear(); m_cameraParams.clear(); m_streams.clear(); m_fovs.clear(); }
+    void clear() { m_last.clear(); m_params.clear(); m_cameraParams.clear(); m_streams.clear(); m_fovs.clear(); m_gimbalParams.clear(); }
 
     const CapturedFrame *latest(quint32 msgid) const;                // newest from any component
     const CapturedFrame *latest(quint32 msgid, quint8 compid) const;
     const QMap<int, Value> &payloadParams() const { return m_params; }  // DEBUG.ind -> value
     const QMap<QString, Value> &cameraParams() const { return m_cameraParams; }  // PARAM_EXT_VALUE param_id -> uint32
+    const QMap<QString, GimbalParam> &gimbalParams() const { return m_gimbalParams; }  // PARAM_VALUE from the gimbal, by param_id
     // Newest frame per stream and per camera: a reply for one must not hide the other
     const QMap<int, CapturedFrame> &streams() const { return m_streams; }  // VIDEO_STREAM_INFORMATION by stream_id
     const QMap<int, CapturedFrame> &fovs() const { return m_fovs; }        // CAMERA_FOV_STATUS by camera_device_id
@@ -53,4 +62,5 @@ private:
     QMap<int, Value> m_params;
     QMap<QString, Value> m_cameraParams;
     QMap<int, CapturedFrame> m_streams, m_fovs;
+    QMap<QString, GimbalParam> m_gimbalParams;
 };

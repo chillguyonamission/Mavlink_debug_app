@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <cstring>
+#include <limits>
 
 namespace GimbalFlags {
 
@@ -51,6 +52,23 @@ bool gimbalAttitude(const MavFrame &f, GimbalAttitude *out)
     return true;
 }
 
+bool gimbalParamFits(int mavParamType, double v)
+{
+    if (!std::isfinite(v)) return false;
+    const auto integer = [v](double lo, double hi) { return v == std::trunc(v) && v >= lo && v <= hi; };
+    const double exact = 1 << 24;  // the largest range a float holds without rounding integers
+    switch (mavParamType) {
+    case MAV_PARAM_TYPE_UINT8: return integer(0, 255);
+    case MAV_PARAM_TYPE_INT8: return integer(-128, 127);
+    case MAV_PARAM_TYPE_UINT16: return integer(0, 65535);
+    case MAV_PARAM_TYPE_INT16: return integer(-32768, 32767);
+    case MAV_PARAM_TYPE_UINT32: return integer(0, exact);
+    case MAV_PARAM_TYPE_INT32: return integer(-exact, exact);
+    case MAV_PARAM_TYPE_REAL32: return std::abs(v) <= std::numeric_limits<float>::max();
+    }
+    return false;  // an unknown type: nothing says what the value means
+}
+
 std::optional<double> fieldNumber(const MavFrame &f, const char *name, int index)
 {
     for (const MavField &x : decodeFields(f)) {
@@ -83,6 +101,11 @@ void TelemetryStore::add(const CapturedFrame &c)
         quint32 value;  // the uint32 in the first bytes, as the SDK's _handle_msg_param_ext_value() reads it
         memcpy(&value, v.param_value, sizeof value);
         m_cameraParams[QString::fromLatin1(v.param_id, int(strnlen(v.param_id, sizeof v.param_id)))] = {double(value), c.monoNs};
+    } else if (c.frame.msgid == MAVLINK_MSG_ID_PARAM_VALUE &&
+               (c.frame.compid == MAV_COMP_ID_GIMBAL || (c.frame.compid >= MAV_COMP_ID_GIMBAL2 && c.frame.compid <= MAV_COMP_ID_GIMBAL6))) {
+        mavlink_param_value_t v;
+        mavlink_msg_param_value_decode(&c.frame.msg, &v);
+        m_gimbalParams[QString::fromLatin1(v.param_id, int(strnlen(v.param_id, sizeof v.param_id)))] = {double(v.param_value), c.monoNs, v.param_index, v.param_count, v.param_type};
     } else if (c.frame.msgid == MAVLINK_MSG_ID_VIDEO_STREAM_INFORMATION) {
         m_streams[mavlink_msg_video_stream_information_get_stream_id(&c.frame.msg)] = c;
     } else if (c.frame.msgid == MAVLINK_MSG_ID_CAMERA_FOV_STATUS) {

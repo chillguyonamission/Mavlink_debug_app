@@ -966,6 +966,86 @@ void TelemetryPage::refresh()
     }
 }
 
+// --- Gimbal settings -------------------------------------------------------------------------
+
+GimbalSettingsPage::GimbalSettingsPage(PayloadLink *link, const MavlinkDict *dict, QWidget *parent)
+    : PayloadPage(link, dict, parent), m_table(new QTableWidget(0, 5)), m_count(new QLabel), m_value(new QDoubleSpinBox)
+{
+    QPushButton *read = button(QStringLiteral("Read from gimbal"), QStringLiteral("PARAM_REQUEST_LIST: the gimbal answers with PARAM_VALUE for each one. "
+                                                                                 "Replies can be lost; reading again fills the gaps."));
+    connect(read, &QPushButton::clicked, this, [this] { report(m_link->gimbalSettingsRead()); });
+    m_value->setRange(-1e7, 1e7);
+    m_value->setDecimals(3);
+    m_write = button(QStringLiteral("Write…"), QStringLiteral("PARAM_SET, then reads the value back. Asks first."), "danger");
+    m_write->setEnabled(false);
+    connect(m_write, &QPushButton::clicked, this, [this] {
+        const double value = m_value->value();
+        if (QMessageBox::warning(this, QStringLiteral("Write gimbal setting"),
+                                 QStringLiteral("Write %1 = %2 (the gimbal reports %3)?\n\nThe SDK documents no ranges, and a wrong value can make the "
+                                                "gimbal unstable. Whether it survives a restart is not documented.")
+                                     .arg(m_selected).arg(value).arg(m_link->telemetry().gimbalParams().value(m_selected).value),
+                                 QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel) != QMessageBox::Yes)
+            return;
+        report(m_link->gimbalSettingWrite(m_selected, value));
+    });
+    auto *top = new QHBoxLayout;
+    top->addWidget(read);
+    top->addWidget(m_count, 1);
+    top->addWidget(new QLabel(QStringLiteral("New value")));
+    top->addWidget(m_value);
+    top->addWidget(m_write);
+    auto *controls = new QWidget;
+    controls->setLayout(top);
+    top->setContentsMargins(0, 0, 0, 0);
+
+    m_table->setHorizontalHeaderLabels({QStringLiteral("ID"), QStringLiteral("Index"), QStringLiteral("Value"), QStringLiteral("Type"), QStringLiteral("Age (s)")});
+    m_table->verticalHeader()->hide();
+    m_table->horizontalHeader()->setStretchLastSection(true);
+    m_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    m_table->setSelectionBehavior(QAbstractItemView::SelectRows);
+    m_table->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_table->verticalHeader()->setDefaultSectionSize(m_table->fontMetrics().height() + 6);
+    connect(m_table, &QTableWidget::currentCellChanged, this, [this](int row) {
+        const QTableWidgetItem *item = row >= 0 ? m_table->item(row, 0) : nullptr;
+        m_selected = item ? item->text() : QString();
+        m_write->setEnabled(item);
+        m_write->setText(item ? QStringLiteral("Write %1…").arg(m_selected) : QStringLiteral("Write…"));
+        if (item) m_value->setValue(m_link->telemetry().gimbalParams().value(m_selected).value);
+    });
+    setPage(controls, group(QStringLiteral("GIMBAL PARAMETERS (PARAM_VALUE)"), [this] {
+                auto *l = new QVBoxLayout;
+                l->addWidget(m_table);
+                return l;
+            }()), true);
+    refresh();
+}
+
+void GimbalSettingsPage::refresh()
+{
+    const auto &params = m_link->telemetry().gimbalParams();
+    const qint64 n = now();
+    int expected = 0;
+    m_table->blockSignals(true);  // only a user's selection may change m_selected
+    m_table->setRowCount(params.size());
+    int row = 0;
+    for (auto it = params.cbegin(); it != params.cend(); ++it, ++row) {
+        expected = std::max(expected, it->count);
+        const QString type = m_dict ? m_dict->enumLabel(QStringLiteral("MAV_PARAM_TYPE"), it->type) : QString();
+        const QString cells[5] = {it.key(), QString::number(it->index), QString::number(it->value, 'g', 7), type.isEmpty() ? QString::number(it->type) : type,
+                                  QString::number(double(n - it->monoNs) / 1e9, 'f', 1)};
+        for (int col = 0; col < 5; ++col) {
+            QTableWidgetItem *item = m_table->item(row, col);
+            if (!item) m_table->setItem(row, col, item = new QTableWidgetItem);
+            item->setText(cells[col]);
+        }
+        if (it.key() == m_selected && m_table->currentRow() != row) m_table->setCurrentCell(row, 0);
+    }
+    m_table->blockSignals(false);
+    m_count->setText(params.isEmpty() ? colored(QStringLiteral("Not read yet"), Theme::Dim)
+                                      : colored(QStringLiteral("%1 of %2 received").arg(params.size()).arg(expected),
+                                                params.size() < expected ? Theme::Warn : Theme::Dim));
+}
+
 // --- Commands --------------------------------------------------------------------------------
 
 CommandsPage::CommandsPage(PayloadLink *link, const MavlinkDict *dict, QWidget *parent)

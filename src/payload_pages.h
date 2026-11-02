@@ -143,6 +143,24 @@ private:
     QTableWidget *m_params;
 };
 
+// The gimbal's own parameters. A separate page from GimbalPage: these are stored settings, not motion.
+class GimbalSettingsPage : public PayloadPage
+{
+    Q_OBJECT
+public:
+    GimbalSettingsPage(PayloadLink *link, const MavlinkDict *dict, QWidget *parent = nullptr);
+
+protected:
+    void refresh() override;
+
+private:
+    QTableWidget *m_table;
+    QLabel *m_count;
+    QDoubleSpinBox *m_value;
+    QPushButton *m_write;
+    QString m_selected;  // by ID: rows move while a list arrives, and the wrong row must never be written
+};
+
 class CommandsPage : public QWidget
 {
     Q_OBJECT

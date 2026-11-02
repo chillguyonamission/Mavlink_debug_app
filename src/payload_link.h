@@ -115,6 +115,11 @@ public:
     bool irFfcMode(bool automatic);  // also starts the FFC_MODE DEBUG stream: the only read-back, the SDK's getter is empty
     bool irFfcTrigger();
     bool eoWbOnePush();
+
+    // The gimbal's own parameters (PARAM protocol), not its motion. The answer is PARAM_VALUE, in telemetry().
+    bool gimbalSettingsRead();
+    // Only a parameter the gimbal has reported, with a value its reported type can hold. Then reads it back.
+    bool gimbalSettingWrite(const QString &id, double value);
     QString commandError() const { return m_commandError; }
 
     const CommandTracker &tracker() const { return m_tracker; }

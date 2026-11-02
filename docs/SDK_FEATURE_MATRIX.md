@@ -54,7 +54,7 @@ Every public `PayloadSdkInterface` API in `fba3c70`, and what this app does with
 
 | API | Status | HW | Notes |
 |---|---|---|---|
-| `setPayloadStreamBitrate`, `setPayloadStreamResolution`, `setPayloadStreamProfile` | Needs verification | | |
+| `setPayloadStreamBitrate`, `setPayloadStreamResolution`, `setPayloadStreamProfile` | Needs verification | | Values, persistence and RTSP recovery unverified |
 | `getPayloadStreamBitrate` | Unsupported | | Requests stream information and always returns 0. The app shows the bitrate from the received `VIDEO_STREAM_INFORMATION` instead |
 
 ## Gimbal
@@ -63,7 +63,8 @@ Every public `PayloadSdkInterface` API in `fba3c70`, and what this app does with
 |---|---|---|---|
 | `setGimbalMode`, `setGimbalSpeed`, `setGimbalDeviceFlags` | Implemented | yes | `setGimbalDeviceFlags` is an app patch. OFF, RESET and MAPPING not run on hardware |
 | `getGimbalDeviceStatusFlags`, `setGimbalMove_MAVLinkV1` | Available, unused | | The app reads flags from validated telemetry |
-| `getPayloadGimbalSettingList`, `getPayloadGimbalSettingByID`, `getPayloadGimbalSettingByIndex`, `setPayloadGimbalParamByID` | Available, unused | | |
+| `getPayloadGimbalSettingList`, `getPayloadGimbalSettingByID`, `setPayloadGimbalParamByID` | Implemented | no | Analyze › Gimbal settings. 16-character IDs are refused: the SDK's `strcpy` overruns |
+| `getPayloadGimbalSettingByIndex` | Available, unused | | Reading again fills gaps |
 | `sendPayloadGimbalCalibGyro`, `sendPayloadGimbalCalibAccel`, `sendPayloadGimbalSearchHome`, `sendPayloadGimbalAutoTune` | Available, unused | | Not requested |
 | `sendPayloadGimbalCalibMotor` | Needs verification | | Sends `MAV_CMD_DO_SET_HOME` with param7 = 1, which does not match its name |
 

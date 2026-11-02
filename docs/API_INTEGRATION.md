@@ -144,3 +144,51 @@ params 0.
   `PAYLOAD_CAMERA_VIDEO_WHITE_BALANCE_ONE_PUSH`, so MB1 has it disabled. The SDK itself gates neither command per model.
 - **Not assumed:** the SDK's FFC example selects the IR view first; the app does not change the view. Whether one-push
   needs White balance = One push first is undocumented.
+
+## Gimbal settings
+
+The standard MAVLink parameter protocol, through the **SDK API**, on its own page: Analyze › Gimbal settings. It never
+sends motion or mode commands.
+
+| Action | App call | SDK call | On the wire | Answer |
+|---|---|---|---|---|
+| Read | `gimbalSettingsRead()` | `getPayloadGimbalSettingList()` | `PARAM_REQUEST_LIST` to the gimbal | One `PARAM_VALUE` per parameter |
+| Write | `gimbalSettingWrite(id, value)` | `setPayloadGimbalParamByID()` | `PARAM_SET`: the ID, the value as a float, `param_type` 0 | No ACK exists |
+| Read back | automatic after a write | `getPayloadGimbalSettingByID()` | `PARAM_REQUEST_READ`, `param_index` -1 | `PARAM_VALUE` |
+
+- **Response format:** `PARAM_VALUE` has `param_id` (16 characters, not terminated at full length), `param_value` as a
+  float, `param_type`, `param_index`, `param_count`. Only frames from a gimbal component (154, 171–175) are stored. The
+  page shows *N of M received*, because replies can be lost. Reading again fills the gaps.
+- **Feedback:** the command log says *Sent (no ACK defined)*. The only confirmation is the value in the table changing.
+- **Guards on a write:**
+  - The operator confirms a dialog naming the parameter, the new value and the reported one.
+  - The ID must have been read from the gimbal.
+  - The value must fit the reported type. It travels as a float, so integers beyond 2^24 and unknown types are refused.
+  - A 16-character ID is refused, because `setPayloadGimbalParamByID()` copies it with `strcpy` into a `char[16]`. Those
+    parameters can be read, not written.
+  - The selection is held by ID, so a row moving while the list arrives cannot change what gets written.
+- **Not known:** ranges (the SDK documents none; its example writes `STIFF_TILT` = 50), whether a value is stored across
+  restarts, and which parameters each model has. The list comes from the gimbal, so no per-model table exists.
+- **Not exposed:** `sendPayloadGimbalCalibMotor()` sends `MAV_CMD_DO_SET_HOME` with param7 = 1, which does not match its
+  name. Calibration and auto-tune were not requested.
+
+## Not built
+
+These stay out until the stated question is answered. The encodings below are from the SDK source; none has been sent by
+this app. All are `COMMAND_LONG` `MAV_CMD_USER_4` to compid 26.
+
+| Function | SDK call | param1, param2, param3, param4, param5 | Waiting for |
+|---|---|---|---|
+| Stream bitrate | `setPayloadStreamBitrate(cam, bps)` | 4, 2, cam, 0, bps | Whether it persists and how RTSP recovers. The range 512000–16000000 appears only in the example's help text |
+| Stream resolution | `setPayloadStreamResolution(cam, level)` | 4, 2, cam, 1, level | The level list (the example shows only level 1: EO 1920×1080, IR 640×512), persistence, recovery |
+| Stream profile | `setPayloadStreamProfile(cam, profile)` | 4, 2, cam, 2, profile | The profile list (the example shows only 1 = Balance), persistence, recovery |
+| Standby | `setPayloadStandbyMode(on)` | 4, 3, 0, on, 0 | What stops working, and how to recover. Disruptive |
+| Restart an app | `setPayloadRestartApps(id)` | 4, 4, id, 0, 0 (0 payload, 1 streaming, 2 tracking, 3 web UI, 4 gimbal) | Link and video recovery per app. Disruptive |
+| OrusL SpotAE | `setCameraExtSettings_SpotAE_*` | 4, 5, 0 display / 1 mode / 2 position, then values | An OrusL unit, and the value meanings |
+| GPS, time | `sendPayloadGPSPosition`, `sendPayloadGPSRawInt`, `sendPayloadSystemTime` | Standard messages, not `USER_4` | An autopilot input source, which the app does not have. Sending invented positions would be worse than none |
+
+The stream functions number cameras 1 = EO, 2 = IR, while `getPayloadCameraFOVStatus()` uses `camera_type_t`
+0 = EO, 1 = IR, so the two must not share a constant.
+
+The app already reads the current bitrate, resolution and profile-independent stream data from `VIDEO_STREAM_INFORMATION`
+(see *Stream and FOV telemetry*), so a later write can be confirmed from a received message.

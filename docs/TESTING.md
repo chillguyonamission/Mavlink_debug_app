@@ -14,9 +14,9 @@ cmake -S . -B build && cmake --build build -j2 && ctest --test-dir build --outpu
 |---|---|
 | `mavlink_frame`, `link_logic` | Framing, CRC, link states |
 | `sdk_transport`, `payload_link` | Real SDK on loopback, connect and disconnect |
-| `payload_control` | Exact outgoing frames, ACK correlation, telemetry, profiles |
+| `payload_control` | Exact outgoing frames (including every `MAV_CMD_USER_4` parameter of the calibration commands), ACK correlation, telemetry, stream and FOV requests, gimbal settings, profiles |
 | `detection` | Packet validation, states, overlay pixels at hand-computed positions through resizes, selection, the SDK callback path, tracker encoding |
-| `main_window` | Offscreen GUI against a fake payload, including the detection workflow |
+| `main_window` | Offscreen GUI against a fake payload, including the detection workflow, fresh-only stream and FOV display, per-model controls, and gimbal setting confirmation |
 | `inspector`, `pcap`, `video` | Inspector, capture files, local RTSP server |
 
 `test_main_window` also writes screenshots when `SCREENSHOT_DIR` is set.
@@ -36,4 +36,6 @@ only when you have approved that step. See `docs/DEVELOPMENT_PROGRESS.md` for wh
 | Detection shows **Refused** | The payload rejected the mode or the stream. See the result column in Analyze › Commands |
 | Detection shows **Stale** | Packets stopped. Check the link lamp, and whether another client changed `TRACK_MODE` |
 | `invalid` count in the detection panel | Packets carry boxes that fail geometry checks. Inspect `V2_EXTENSION` in the MAVLink monitor |
+| Telemetry shows **no fresh reply** for stream or FOV | The payload stopped answering, or never did. ZIO has no IR, so its IR FOV request should show *No ACK (timeout)* |
+| Gimbal settings stay at **N of M received** | Replies were lost. Press Read from gimbal again; it fills the gaps |
 | Boxes look misaligned | Check the view source. Alignment is known only to be intended for EO only, and the panel warns otherwise |

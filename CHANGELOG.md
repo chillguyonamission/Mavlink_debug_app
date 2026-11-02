@@ -15,8 +15,13 @@ Newest first. "Tested" means the hardware-free CTest suite unless a line says ha
   a reply is fresh. Tested with a fake payload; not run on hardware.
 - **Image calibration:** IR FFC auto, manual and trigger, and EO one-push white balance, offered only on models whose
   SDK header supports them. Tested with a fake payload; not run on hardware.
+- **Gimbal settings:** a new Analyze tab reads the gimbal's parameters and writes one after a confirmation. Only
+  parameters already read, and only values their type can hold. Tested with a fake payload; not run on hardware.
 
 ### Not added, on purpose
 
-- Forwarding a selected box to the tracker: no source confirms it works on any model. See
-  `docs/API_INTEGRATION.md`.
+- Forwarding a selected box to the tracker: no source confirms it works on any model.
+- Stream bitrate, resolution and profile; standby and restart; OrusL SpotAE; GPS and time forwarding: their conditions
+  are not met.
+
+Reasons for each are in `docs/API_INTEGRATION.md`.

@@ -342,6 +342,82 @@ private slots:
         QVERIFY(!o.attitude && !o.eoZoom && !o.recording && !o.trackStatus && !o.trackBox);
     }
 
+    void gimbalParamValuesFitTheirType()
+    {
+        QVERIFY(gimbalParamFits(MAV_PARAM_TYPE_UINT8, 255));
+        QVERIFY(!gimbalParamFits(MAV_PARAM_TYPE_UINT8, 256));
+        QVERIFY(!gimbalParamFits(MAV_PARAM_TYPE_UINT8, -1));
+        QVERIFY(!gimbalParamFits(MAV_PARAM_TYPE_UINT8, 1.5));
+        QVERIFY(gimbalParamFits(MAV_PARAM_TYPE_INT16, -32768));
+        QVERIFY(!gimbalParamFits(MAV_PARAM_TYPE_INT16, 32768));
+        QVERIFY(gimbalParamFits(MAV_PARAM_TYPE_UINT32, 16777216));
+        QVERIFY(!gimbalParamFits(MAV_PARAM_TYPE_UINT32, 16777217));  // a float would round it
+        QVERIFY(gimbalParamFits(MAV_PARAM_TYPE_REAL32, 0.25));
+        QVERIFY(!gimbalParamFits(MAV_PARAM_TYPE_REAL32, NAN));
+        QVERIFY(!gimbalParamFits(MAV_PARAM_TYPE_REAL32, INFINITY));
+        QVERIFY(!gimbalParamFits(0, 1));  // the SDK's own sends leave the type 0; a reply with no type says nothing
+    }
+
+    void gimbalSettingsOnTheWire()
+    {
+        PayloadLink link;
+        QVERIFY(!link.gimbalSettingsRead());
+        FakePayload fake;
+        link.connectTo(QStringLiteral("127.0.0.1"), fake.port);
+        QTRY_STATE(link, LinkState::SocketOpen, 5000);
+        QVERIFY(fake.learnAppEndpoint());
+        fake.sendHeartbeat(MAV_COMP_ID_GIMBAL, MAV_TYPE_GIMBAL);
+        QTest::qWait(300);
+        fake.received();
+
+        MavFrame f;
+        QVERIFY(link.gimbalSettingsRead());
+        QVERIFY(waitTx(fake, [](const MavFrame &x) { return x.msgid == MAVLINK_MSG_ID_PARAM_REQUEST_LIST; }, &f));
+        QCOMPARE(int(f.targetComponent), int(MAV_COMP_ID_GIMBAL));
+        QTRY_VERIFY_WITH_TIMEOUT(find(link, QStringLiteral("Read all gimbal settings"))->state == TrackedCommand::NoAckDefined, 3000);
+
+        QVERIFY(!link.gimbalSettingWrite(QStringLiteral("STIFF_TILT"), 50));  // not read yet
+        QVERIFY(link.commandError().contains(QStringLiteral("not read")));
+
+        mavlink_message_t m;
+        auto paramValue = [&](uint8_t comp, const char *id, float value, uint8_t type, uint16_t index) {
+            char pid[16];
+            strncpy(pid, id, sizeof pid);
+            mavlink_msg_param_value_pack_chan(1, comp, MAVLINK_COMM_0, &m, pid, value, type, 3, index);
+            fake.send(m);
+        };
+        paramValue(TelemetryStore::kPayloadCore, "NOT_THE_GIMBAL", 1, MAV_PARAM_TYPE_REAL32, 9);  // the payload core's parameters are something else
+        paramValue(MAV_COMP_ID_GIMBAL, "STIFF_TILT", 40, MAV_PARAM_TYPE_UINT8, 0);
+        paramValue(MAV_COMP_ID_GIMBAL, "SIXTEEN_CHARS_ID", 1, MAV_PARAM_TYPE_UINT8, 1);
+        QTRY_COMPARE_WITH_TIMEOUT(link.telemetry().gimbalParams().size(), 2, 3000);
+        const TelemetryStore::GimbalParam p = link.telemetry().gimbalParams().value(QStringLiteral("STIFF_TILT"));
+        QCOMPARE(p.value, 40.0);
+        QCOMPARE(p.count, 3);
+        QCOMPARE(p.type, int(MAV_PARAM_TYPE_UINT8));
+        QVERIFY(link.telemetry().gimbalParams().contains(QStringLiteral("SIXTEEN_CHARS_ID")));  // no terminator on the wire
+
+        QVERIFY(!link.gimbalSettingWrite(QStringLiteral("STIFF_TILT"), 256));   // does not fit
+        QVERIFY(!link.gimbalSettingWrite(QStringLiteral("SIXTEEN_CHARS_ID"), 2));  // the SDK's strcpy would overrun
+        QVERIFY(link.commandError().contains(QStringLiteral("16-character")));
+
+        fake.received();
+        QVERIFY(link.gimbalSettingWrite(QStringLiteral("STIFF_TILT"), 50));
+        QVERIFY(waitTx(fake, [](const MavFrame &x) { return x.msgid == MAVLINK_MSG_ID_PARAM_SET; }, &f));
+        char id[17] = {0};
+        mavlink_msg_param_set_get_param_id(&f.msg, id);
+        QCOMPARE(QString::fromLatin1(id), QStringLiteral("STIFF_TILT"));
+        QCOMPARE(mavlink_msg_param_set_get_param_value(&f.msg), 50.f);
+        QCOMPARE(int(f.targetComponent), int(MAV_COMP_ID_GIMBAL));
+        QVERIFY(waitTx(fake, [](const MavFrame &x) { return x.msgid == MAVLINK_MSG_ID_PARAM_REQUEST_READ; }, &f));  // the read-back
+        memset(id, 0, sizeof id);
+        mavlink_msg_param_request_read_get_param_id(&f.msg, id);
+        QCOMPARE(QString::fromLatin1(id), QStringLiteral("STIFF_TILT"));
+        QCOMPARE(int(mavlink_msg_param_request_read_get_param_index(&f.msg)), -1);  // by ID
+        QTRY_VERIFY_WITH_TIMEOUT(find(link, QStringLiteral("Gimbal setting STIFF_TILT = 50"))->state == TrackedCommand::NoAckDefined, 3000);
+        paramValue(MAV_COMP_ID_GIMBAL, "STIFF_TILT", 50, MAV_PARAM_TYPE_UINT8, 0);
+        QTRY_COMPARE_WITH_TIMEOUT(link.telemetry().gimbalParams().value(QStringLiteral("STIFF_TILT")).value, 50.0, 3000);
+    }
+
     // Every parameter of each custom command, since they share MAV_CMD_USER_4
     void imageCalibrationOnTheWire()
     {

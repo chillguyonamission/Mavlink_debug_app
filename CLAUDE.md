@@ -11,7 +11,7 @@ results, acceptance checklist, limitations). For setup on native Ubuntu, see
   VIO gimbal and camera control, telemetry, command/ACK tracking, video, clean-build validation, and
   install.
 - Development so far was on Windows + WSL2 (Ubuntu 24.04). Work is moving to the user's native
-  dual-boot Ubuntu 24.04 to finish the hardware testing. The native build passes 9/9.
+  dual-boot Ubuntu 24.04 to finish the hardware testing. The native build passes 10/10.
 - UI redesign (2026-10-22) is done:
   - Dark station theme (`src/theme.*`).
   - One Operate workspace (gimbal | video with HUD | camera), plus an Analyze view.
@@ -31,9 +31,14 @@ results, acceptance checklist, limitations). For setup on native Ubuntu, see
   - The automatic info request now waits for the camera's heartbeat.
   - `--steps control-onboard,camera,rate,mode-flags` passed.
 
+- 2026-11-02: object detection (overlay, states, selection), stream and FOV telemetry, IR FFC and one-push white balance,
+  and gimbal settings. **All tested only against the fake payload.** The checks still needed are in
+  `docs/DEVELOPMENT_PROGRESS.md`. See `docs/SDK_FEATURE_MATRIX.md` and `docs/API_INTEGRATION.md`.
+
 ## Next steps
 
-1. Native build: `scripts/build.sh` should report 9/9 tests passing.
+1. Native build: `scripts/build.sh` should report 10/10 tests passing. If it fails with a `CMakeCache.txt` path error, the
+   repository moved: delete `build/`.
 2. On native Linux, verify RTSP over UDP and live network capture (both impossible under WSL2).
    `ffmpeg -rtsp_transport udp` got only 3 frames on 2026-10-23 (TCP fine). The laptop then had two
    addresses in 192.168.55.0/24 (`.3` and `.100`), which may matter.
@@ -52,6 +57,8 @@ results, acceptance checklist, limitations). For setup on native Ubuntu, see
     restored afterwards.
   - **Not approved:** photo capture or recording (SD writes), gimbal OFF / RESET / MAPPING, and
     changing `RC_MODE` (a persistent setting). Re-ask for these.
+  - **Not yet approved (new, 2026-11-02):** `TRACK_MODE` = detection, `hw_vio_commands --steps detection` or
+    `detection-forward`, FFC and one-push commands, and gimbal parameter writes.
   - Never write a camera setting value that was not read back through a decoder already checked
     against the camera (`--steps settings-read`).
 - Commit and push to GitHub when a stage or fix is finished.
@@ -99,6 +106,11 @@ results, acceptance checklist, limitations). For setup on native Ubuntu, see
   - The camera lists `C_V_GAIN` and `C_V_BrP` and rejects the header's `_HS`/`_LS` IDs.
   - It answered parameter messages only from source component IDs it had already seen (new compids
     195/196 got no reply, 191/193/194 did). The app's SDK compid works.
+- **Detection packets:** MAVLink 2 trims trailing zeros, so a short `V2_EXTENSION` is normal and a length check would drop
+  good data. Geometry validation rejects what the wire did not carry. `TRACK_MODE` selects tracking or detection, so
+  the two are treated as exclusive. Forwarding a box to the tracker is held back until `--steps detection-forward` answers it.
+- **SDK traps:** `setPayloadGimbalParamByID()` `strcpy`s into a `char[16]`, so 16-character IDs are refused.
+  `getPayloadCameraFFCMode()` is empty. `getPayloadStreamBitrate()` always returns 0.
 - **Camera component:** compid 100 (not 101).
 - **REQUEST_MESSAGE:** answered with the message itself but no COMMAND_ACK.
 - **Sequence numbers:** the VIO payload core and camera reorder them (N+1 before N). This is not

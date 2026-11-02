@@ -12,6 +12,10 @@
 #include <QApplication>
 #include <QComboBox>
 #include <QDialog>
+#include <QDoubleSpinBox>
+#include <QMessageBox>
+#include <QTableWidget>
+#include <QTimer>
 #include <QLabel>
 #include <QLineEdit>
 #include <QSignalSpy>
@@ -288,6 +292,91 @@ private slots:
         QVERIFY(ip->isEnabled());
     }
 
+    // Nothing is written without the operator's yes, and only the row they chose, even when rows move
+    void gimbalSettingsPageWritesOnlyTheSelectedParameterAfterConfirming()
+    {
+        FakePayload fake;
+        MainWindow w;
+        w.show();
+        w.findChild<QLineEdit *>(QStringLiteral("ipEdit"))->setText(QStringLiteral("127.0.0.1"));
+        w.findChild<QSpinBox *>(QStringLiteral("portSpin"))->setValue(fake.port);
+        w.findChild<QPushButton *>(QStringLiteral("connectButton"))->click();
+        QTRY_VERIFY_WITH_TIMEOUT(isOpen(w.link()->state()), 5000);
+        QVERIFY(fake.learnAppEndpoint());
+        auto *page = w.findChild<GimbalSettingsPage *>();
+        QVERIFY(page);
+        w.findChild<QPushButton *>(QStringLiteral("navAnalyze"))->click();
+        w.findChild<QTabWidget *>(QStringLiteral("analyzeTabs"))->setCurrentWidget(page);
+        auto *table = page->findChild<QTableWidget *>();
+        auto *value = page->findChild<QDoubleSpinBox *>();
+        QPushButton *write = nullptr, *read = nullptr;
+        for (QPushButton *b : page->findChildren<QPushButton *>()) {
+            if (b->text().startsWith(QStringLiteral("Write"))) write = b;
+            if (b->text() == QStringLiteral("Read from gimbal")) read = b;
+        }
+        QVERIFY(table && value && write && read);
+        QVERIFY(!write->isEnabled());  // nothing read, nothing to write
+        read->click();
+
+        mavlink_message_t m;
+        auto paramValue = [&](const char *id, float v, uint16_t index) {
+            char pid[16];
+            strncpy(pid, id, sizeof pid);
+            mavlink_msg_param_value_pack_chan(1, MAV_COMP_ID_GIMBAL, MAVLINK_COMM_0, &m, pid, v, MAV_PARAM_TYPE_UINT8, 3, index);
+            fake.send(m);
+        };
+        paramValue("STIFF_TILT", 40, 0);
+        QTRY_COMPARE_WITH_TIMEOUT(table->rowCount(), 1, 3000);
+        QLabel *count = nullptr;
+        for (QLabel *l : page->findChildren<QLabel *>()) if (l->text().contains(QStringLiteral("1 of 3 received"))) count = l;
+        QVERIFY(count);  // a lost reply is visible
+
+        table->setCurrentCell(0, 0);
+        QCOMPARE(value->value(), 40.0);
+        QVERIFY(write->isEnabled());
+        QCOMPARE(write->text(), QStringLiteral("Write STIFF_TILT…"));
+
+        paramValue("ALPHA_FIRST", 7, 1);  // sorts above: the selected row moves down
+        QTRY_COMPARE_WITH_TIMEOUT(table->rowCount(), 2, 3000);
+        QCOMPARE(table->item(table->currentRow(), 0)->text(), QStringLiteral("STIFF_TILT"));
+        QCOMPARE(value->value(), 40.0);  // and an operator's edit is never overwritten by a refresh
+
+        auto answer = [](QMessageBox::StandardButton b) {
+            QTimer::singleShot(100, qApp, [b] {
+                auto *box = qobject_cast<QMessageBox *>(qApp->activeModalWidget());
+                if (box) box->button(b)->click();
+            });
+        };
+        auto paramSets = [&](int ms) {
+            std::vector<QString> ids;
+            QElapsedTimer t;
+            t.start();
+            while (t.elapsed() < ms) {
+                for (const MavFrame &f : fake.received()) {
+                    if (f.msgid != MAVLINK_MSG_ID_PARAM_SET) continue;
+                    char id[17] = {0};
+                    mavlink_msg_param_set_get_param_id(&f.msg, id);
+                    ids.push_back(QString::fromLatin1(id));
+                }
+                QTest::qWait(10);
+            }
+            return ids;
+        };
+        value->setValue(50);
+        answer(QMessageBox::Cancel);
+        write->click();
+        QVERIFY(paramSets(400).empty());
+        answer(QMessageBox::Yes);
+        write->click();
+        const std::vector<QString> sent = paramSets(800);
+        QCOMPARE(sent.size(), size_t(1));
+        QCOMPARE(sent[0], QStringLiteral("STIFF_TILT"));
+
+        w.findChild<QPushButton *>(QStringLiteral("connectButton"))->click();
+        QTRY_COMPARE_WITH_TIMEOUT(w.link()->state(), LinkState::Disconnected, 3000);
+        w.findChild<QPushButton *>(QStringLiteral("navOperate"))->click();
+    }
+
     // Analyze › Telemetry shows stream and FOV values only after a reply, and only while it is fresh
     void telemetryPageShowsFreshStreamAndFov()
     {
@@ -395,7 +484,10 @@ private slots:
         QTest::mouseClick(view, Qt::LeftButton, {}, centre);
         QCOMPARE(view->selectedDetection(), quint16(7));
         QTRY_VERIFY_WITH_TIMEOUT(label(QStringLiteral("Selected #7 class 3 78%: centre 580, 320, size 200×100")), 3000);
-        if (const QByteArray dir = qgetenv("SCREENSHOT_DIR"); !dir.isEmpty()) w.grab().save(QString::fromLocal8Bit(dir) + QStringLiteral("/operate_detection.png"));
+        if (const QByteArray dir = qgetenv("SCREENSHOT_DIR"); !dir.isEmpty()) {
+            w.grab().save(QString::fromLocal8Bit(dir) + QStringLiteral("/operate_detection.png"));
+            camera->grab().save(QString::fromLocal8Bit(dir) + QStringLiteral("/camera_panel.png"));
+        }
         QTest::qWait(300);
         QCOMPARE(w.link()->tracker().commands().size(), before);  // selecting sends nothing
         for (const MavFrame &f : fake.received()) {

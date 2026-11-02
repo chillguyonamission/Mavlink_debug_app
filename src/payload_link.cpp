@@ -525,6 +525,44 @@ bool PayloadLink::eoWbOnePush()
     return true;
 }
 
+bool PayloadLink::gimbalSettingsRead()
+{
+    if (!ready()) return false;
+    m_tracker.expect(QStringLiteral("Read all gimbal settings"), MAVLINK_MSG_ID_PARAM_REQUEST_LIST, 0, {}, nowMs());
+    m_sdk->getPayloadGimbalSettingList();
+    emit commandsChanged();
+    return true;
+}
+
+bool PayloadLink::gimbalSettingWrite(const QString &id, double value)
+{
+    if (!ready()) return false;
+    const auto it = m_telemetry.gimbalParams().constFind(id);
+    if (it == m_telemetry.gimbalParams().cend()) {
+        m_commandError = QStringLiteral("%1 was not read from the gimbal: refusing to write it").arg(id);
+        return false;
+    }
+    if (!gimbalParamFits(it->type, value)) {
+        m_commandError = QStringLiteral("%1 does not fit %2 (MAV_PARAM_TYPE %3)").arg(value).arg(id).arg(it->type);
+        return false;
+    }
+    // The SDK strcpy()s the ID into a char[16], so a full-length one (legal in MAVLink) would overrun it
+    QByteArray bytes = id.toLatin1();
+    if (bytes.size() >= 16) {
+        m_commandError = QStringLiteral("%1: the SDK cannot send a 16-character parameter ID").arg(id);
+        return false;
+    }
+    m_tracker.expect(QStringLiteral("Gimbal setting %1 = %2").arg(id).arg(value), MAVLINK_MSG_ID_PARAM_SET, 0, {}, nowMs(), [bytes](const MavFrame &f) {
+        char pid[17] = {0};
+        mavlink_msg_param_set_get_param_id(&f.msg, pid);
+        return bytes == pid;
+    });
+    m_sdk->setPayloadGimbalParamByID(bytes.data(), float(value));
+    m_sdk->getPayloadGimbalSettingByID(bytes.data());  // no ACK exists: the display shows what the gimbal then reports
+    emit commandsChanged();
+    return true;
+}
+
 quint64 PayloadLink::detectionStream(int intervalMs)
 {
     const quint64 id = m_tracker.expect(intervalMs ? QStringLiteral("Detection stream every %1 ms").arg(intervalMs) : QStringLiteral("Detection stream: stop"),

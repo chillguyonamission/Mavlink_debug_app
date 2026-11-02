@@ -314,6 +314,7 @@ MainWindow::MainWindow(QWidget *parent)
     tabs->setDocumentMode(true);
     tabs->addTab(commands, QStringLiteral("Commands"));
     tabs->addTab(new TelemetryPage(m_link, dict), QStringLiteral("Telemetry"));
+    tabs->addTab(new GimbalSettingsPage(m_link, dict), QStringLiteral("Gimbal settings"));
     tabs->addTab(m_statsPage, QStringLiteral("Statistics"));
 
     m_views = new QStackedWidget;
