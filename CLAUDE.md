@@ -35,6 +35,9 @@ results, acceptance checklist, limitations). For setup on native Ubuntu, see
   and gimbal settings. **All tested only against the fake payload.** The checks still needed are in
   `docs/DEVELOPMENT_PROGRESS.md`. See `docs/SDK_FEATURE_MATRIX.md` and `docs/API_INTEGRATION.md`.
 
+- 2026-11-02, later: audited the payload profiles against the SDK. Four targets, four profiles, none missing; Lynx and GHadron
+  use MB1. Coverage matrix in `docs/SDK_FEATURE_MATRIX.md`. **ZIO, MB1 and OrusL still never ran on hardware.**
+
 ## Next steps
 
 1. Native build: `scripts/build.sh` should report 10/10 tests passing. If it fails with a `CMakeCache.txt` path error, the
@@ -109,6 +112,9 @@ results, acceptance checklist, limitations). For setup on native Ubuntu, see
 - **Detection packets:** MAVLink 2 trims trailing zeros, so a short `V2_EXTENSION` is normal and a length check would drop
   good data. Geometry validation rejects what the wire did not carry. `TRACK_MODE` selects tracking or detection, so
   the two are treated as exclusive. Forwarding a box to the tracker is held back until `--steps detection-forward` answers it.
+- **Models:** the SDK has four build targets (`VIO`, `ZIO`, `MB1`, `ORUSL`). MB1 is a mainboard: Lynx and GHadron build with it and
+  have no IDs of their own. The SDK has no plain Orus target. Only VIO's reported model name ("Vio") has been seen on a real unit.
+- **Video descriptors:** GStreamer's `vah264dec` keeps one `dmabuf` per pipeline, without any app code. It is not an app leak.
 - **SDK traps:** `setPayloadGimbalParamByID()` `strcpy`s into a `char[16]`, so 16-character IDs are refused.
   `getPayloadCameraFFCMode()` is empty. `getPayloadStreamBitrate()` always returns 0.
 - **Camera component:** compid 100 (not 101).

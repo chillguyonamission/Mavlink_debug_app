@@ -138,6 +138,7 @@ Read-only. **SDK API** for the requests, **standard MAVLink** for the messages, 
 - **Display:** values come from CRC-valid received frames. They show only while the newest reply is younger than the link
   timeout (at least 3 s, since replies come at most every 2 s). After that only the age is shown.
 - **Bitrate:** taken from the received message. `getPayloadStreamBitrate()` is not used, since it always returns 0.
+- **EO-only models:** the IR request is not sent, so ZIO asks only for EO.
 - **Not assumed:** `param2` for FOV is a Gremsy use of a standard field. How `camera_device_id` in the reply maps to EO and
   IR is unverified, so the raw number is shown. MAVLink defines 0 as "a MAVLink camera", so EO and IR replies could share
   an ID, in which case the newer one replaces the older.

@@ -24,8 +24,9 @@ headers and have not been run on hardware. See *Acceptance checklist* and *Known
 ## Supported payloads
 
 PayloadSDK ships one parameter header per model (`libs/payload-define/<model>_sdk.h`). Every model it
-defines has a profile here: VIO, ZIO, MB1 and OrusL. "Orus" means the OrusL profile; the SDK has no other
-Orus header. Choose the model with **Model** in the SETTINGS drawer. The choice is saved with each
+defines has a profile here: VIO, ZIO, MB1 and OrusL. Lynx and GHadron use the MB1 profile, since the SDK builds them
+with `-DMB1`. "Orus" means the OrusL profile; the SDK has no other Orus header. The full inventory and coverage matrix
+are in `docs/SDK_FEATURE_MATRIX.md`. Choose the model with **Model** in the SETTINGS drawer. The choice is saved with each
 connection profile, and changing it rebuilds the gimbal and camera panels. A header warning appears when
 the payload reports a different model name.
 
@@ -41,8 +42,9 @@ recording. What changes per model is listed below, using only that model's heade
 | Record source | ✅ | not supported | ✅ | ✅ |
 | IR palette | ✅ | not supported (EO only) | ✅ | ✅ |
 | Object tracking | ✅ (verified) | ✅ | ✅ | ✅ |
+| Focus | ✅ | ✅ | not supported | ✅ |
 | Gimbal control source | `GB_FW_FLAG` Autopilot / Onboard computer / SBUS Convert | none named | `GB_FW_FLAG` Overwrite / Forward | none named |
-| Camera settings dialog | 30: exposure, image, focus/zoom, thermal, video/OSD/LRF | 25: exposure, image, focus/zoom, video/OSD | 59: exposure, image, focus/zoom, thermal, isotherm regions, video/OSD/AI | 38: exposure, image, focus/zoom, thermal, video/OSD/LRF |
+| Camera settings dialog | 30: exposure, image, focus/zoom, thermal, video/OSD/LRF | 25: exposure, image, focus/zoom, video/OSD | 60: exposure, image, focus/zoom, thermal, isotherm regions, video/OSD/AI | 38: exposure, image, focus/zoom, thermal, video/OSD/LRF |
 
 A control the model does not support is shown disabled as "not supported by <model>". Tracking is replaced
 by a note, and the control-source switch is hidden. Settings whose header gives no values, or only signed

@@ -67,3 +67,52 @@ which keeps the newest `VIDEO_STREAM_INFORMATION` per `stream_id` and `CAMERA_FO
 
 `TelemetryStore` keeps the newest `PARAM_VALUE` per `param_id`, from gimbal components only. `GimbalSettingsPage` reads it
 at 4 Hz. The page has no link to `GimbalPage`: settings and motion stay separate.
+
+## Payload profiles
+
+A `PayloadProfile` is data: IDs, values and capability flags, one file per model, each including only its SDK header
+because the headers reuse macro names with different values. That rule is also why palette lists repeat across the
+files: a shared list would lose the compile-time link to each header.
+
+- `MainWindow::setModel()` rebuilds `GimbalPage` and `CameraPage` from the profile, and tells `PayloadLink` whether the
+  model has an IR camera.
+- `PayloadLink` does not know models otherwise. Its one model fact is `setIrCamera()`, which stops IR, rangefinder and view
+  requests to an EO-only model.
+- Disabled controls say why in their tooltip.
+- `profileMatchesReport()` compares the name the payload reports with the profile, ignoring case and punctuation, so a
+  Lynx on MB1 raises no warning.
+
+## Resources and limits
+
+Measured on 2026-11-02, Intel Core Ultra laptop, release build, with realistic gimbal status frames.
+
+| What | Limit | Measured |
+|---|---|---|
+| Parsing and decoding each frame | | 8.6 µs |
+| `TelemetryStore::add` | One frame per message and component | 0.07 µs |
+| Monitor table | 100,000 frames, then the oldest go | About 100 MB when full |
+| One poll with a full table: 20 or 200 new frames, scroll and repaint | | About 3 ms per 100 ms poll |
+| Command history | 500 | |
+| Detection log | 1000 packets | |
+| Datagrams queued from SDK threads | 20,000, then dropped and counted | |
+
+None of these is a bottleneck, so none was changed. Payload pages skip their 4 Hz refresh while hidden, including their
+requests to the payload.
+
+Connect and disconnect cycles leave threads and file descriptors unchanged (`reconnectingLeavesNothingBehind`). Video
+restarts leave threads and non-GPU descriptors unchanged, and memory flat over 40 restarts
+(`restartingLeavesNothingBehind`). See *Known resource issues* in `docs/TESTING.md`.
+
+## Thread safety
+
+ThreadSanitizer on `sdk_transport`, `payload_link`, `payload_control` and `detection` reports no race on the app's own
+data. It does report these, all left alone because they work in practice and fixing them means changing SDK behaviour:
+
+- Non-atomic SDK flags: `time_to_exit` and `writing_status`.
+- Globals the SDK's receive thread writes and its command functions read, such as `CAMERA_COMPONENT_ID`. A command sent
+  at the very moment the ID first changes could use the old one. The app already waits for the camera before its automatic
+  requests.
+
+Its other reports are inside Qt and D-Bus, which were not built with the checker, so it cannot see their locks. They look
+like false positives, though that was not proven.
+
