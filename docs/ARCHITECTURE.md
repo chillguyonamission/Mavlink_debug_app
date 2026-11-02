@@ -84,7 +84,7 @@ files: a shared list would lose the compile-time link to each header.
 
 ## Resources and limits
 
-Measured on 2026-11-02, Intel Core Ultra laptop, release build, with realistic gimbal status frames.
+Measured on 2026-11-02 on this Intel Meteor Lake laptop, release build, with realistic gimbal status frames.
 
 | What | Limit | Measured |
 |---|---|---|

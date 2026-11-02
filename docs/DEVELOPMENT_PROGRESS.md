@@ -26,7 +26,7 @@ What each unbuilt phase is waiting for is in `docs/API_INTEGRATION.md` under *No
 |---|---|---|---|
 | Focus disabled on MB1 | The SDK says MB1 has no focus controls, but the buttons were live | `payload_profile*`, `payload_pages.cpp` | `main_window` |
 | A Lynx or GHadron on MB1 no longer warns of a wrong model | The check compared names exactly, so it would have warned on a correct setup. "ORUS-L" on OrusL too | `payload_profile.h`, `main_window.cpp` | `payload_control`, `main_window` |
-| EO-only models get no IR, rangefinder or view requests | ZIO was asked for IR FOV every 2 s and streams it cannot send, filling Commands with timeouts | `payload_link.*`, `main_window.cpp` | `payload_control` |
+| EO-only models get no IR, rangefinder or view requests | On connect, ZIO was asked for streams it has no hardware for, and for IR FOV every 2 s while Telemetry was open | `payload_link.*`, `main_window.cpp` | `payload_control` |
 | The PAYLOAD lamp accepts any camera or gimbal ID | The SDK and the rest of the app do. A model not on 100 and 154 would have shown 2/3 forever | `link_health.*`, `main_window.cpp` | `link_logic` |
 | FFC mode and IR temperature streams requested on connect | `ui_demo` does, and the app's list claims to follow it. Read-only | `payload_link.cpp` | `payload_control` |
 | `STORAGE_TYPE` added to MB1 settings | `ui_demo` uses it. Disabled unless the camera reports it | `payload_profile_mb1.cpp` | `payload_control` |
