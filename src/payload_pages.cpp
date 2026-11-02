@@ -812,6 +812,20 @@ TelemetryPage::TelemetryPage(PayloadLink *link, const MavlinkDict *dict, QWidget
     cl->setContentsMargins(0, 0, 0, 0);
     cl->addWidget(group(QStringLiteral("DEVICE"), dev));
 
+    QPushButton *reqStream = button(QStringLiteral("Request stream and FOV"),
+                                    QStringLiteral("MAV_CMD_REQUEST_VIDEO_STREAM_INFORMATION and MAV_CMD_REQUEST_MESSAGE CAMERA_FOV_STATUS for EO and IR, "
+                                                   "tracked in Analyze › Commands. Also asked every 2 s, untracked, while this page is open."));
+    connect(reqStream, &QPushButton::clicked, this, [this] { report(m_link->requestStreamAndFov()); });
+    m_stream = valueLabel();
+    m_fov = valueLabel();
+    m_stream->setWordWrap(true);
+    m_fov->setWordWrap(true);
+    auto *video = new QFormLayout;
+    video->addRow(reqStream);
+    video->addRow(QStringLiteral("Stream (as the payload reports it)"), m_stream);
+    video->addRow(QStringLiteral("Field of view"), m_fov);
+    cl->addWidget(group(QStringLiteral("VIDEO STREAM AND FOV"), video));
+
     m_params = new QTableWidget(0, 4);
     m_params->setHorizontalHeaderLabels({QStringLiteral("Index"), QStringLiteral("Name"), QStringLiteral("Value"), QStringLiteral("Age (s)")});
     m_params->verticalHeader()->hide();
@@ -840,12 +854,48 @@ static QString bytesText(const MavFrame &f, const char *name)
     return s;
 }
 
+// One line per fresh frame. An old reply is not shown as if it were current: only its age is.
+template <class Text>
+static QString freshRows(const QMap<int, CapturedFrame> &frames, qint64 n, int freshMs, Text text)
+{
+    QStringList rows;
+    qint64 newest = -1;
+    for (const CapturedFrame &c : frames) {
+        newest = std::max(newest, c.monoNs);
+        if (n - c.monoNs <= qint64(freshMs) * 1000000) rows << agedValue(text(c.frame), c.monoNs, n, freshMs);
+    }
+    if (!rows.isEmpty()) return rows.join(QStringLiteral("<br>"));
+    return newest < 0 ? agedValue({}, -1, n, freshMs)
+                      : colored(QStringLiteral("no fresh reply (last %1 s ago)").arg(double(n - newest) / 1e9, 0, 'f', 1), Theme::Dim);
+}
+
 void TelemetryPage::refresh()
 {
     const TelemetryStore &tel = m_link->telemetry();
     const int to = m_link->timeoutMs();
     const qint64 n = now();
     const int once = std::numeric_limits<int>::max();  // one-off replies: show their age, never "stale"
+
+    if (isVisible()) m_link->pollStreamAndFov();
+    const int freshMs = std::max(to, 3000);  // the replies come at most every 2 s: a short link timeout must not blank them
+    const auto enumName = [this](const char *e, double v) {
+        const QString l = m_dict ? m_dict->enumLabel(QLatin1String(e), qint64(v)) : QString();
+        return l.isEmpty() ? QString::number(v) : l;
+    };
+    m_stream->setText(freshRows(tel.streams(), n, freshMs, [&](const MavFrame &f) {
+        const auto num = [&](const char *name) { return fieldNumber(f, name).value_or(NAN); };
+        return QStringLiteral("#%1 %2 %3 · %4 %5×%6 · %7 fps · %8 Mbit/s · %9")
+            .arg(num("stream_id")).arg(fieldText(f, "name"), enumName("VIDEO_STREAM_TYPE", num("type")), enumName("VIDEO_STREAM_ENCODING", num("encoding")))
+            .arg(num("resolution_h")).arg(num("resolution_v")).arg(num("framerate"), 0, 'f', 1).arg(num("bitrate") / 1e6, 0, 'f', 2)
+            .arg(fieldText(f, "uri"));
+    }));
+    m_fov->setText(freshRows(tel.fovs(), n, freshMs, [](const MavFrame &f) {
+        const auto angle = [&](const char *name) {
+            const double v = fieldNumber(f, name).value_or(NAN);
+            return std::isnan(v) ? QStringLiteral("unknown") : deg(v);
+        };
+        return QStringLiteral("camera device %1: H %2, V %3").arg(fieldNumber(f, "camera_device_id").value_or(NAN)).arg(angle("hfov"), angle("vfov"));
+    }));
 
     if (const CapturedFrame *c = tel.latest(MAVLINK_MSG_ID_COMPONENT_INFORMATION_BASIC))
         m_component->setText(agedValue(QStringLiteral("%1 / %2 / %3").arg(bytesText(c->frame, "model_name"),

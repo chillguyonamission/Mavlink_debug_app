@@ -88,6 +88,9 @@ public:
     bool captureImage();
     bool recordVideo(bool start);
     bool requestPayloadInfo(bool automatic = false);  // info messages + the SDK DEBUG parameter streams
+    // Read-only: VIDEO_STREAM_INFORMATION and CAMERA_FOV_STATUS for EO and IR. The replies land in telemetry().
+    bool requestStreamAndFov();
+    void pollStreamAndFov();  // call freely: at most every 2 s, untracked, and only once the camera was heard
 
     // Object tracking: MAV_CMD_USER_4 with param1 = 4, as the SDK's payload_do_object_tracking example sends it.
     enum TrackMode { TrackStop = 0, TrackActive = 1 };
@@ -136,6 +139,7 @@ private:
     bool setMotionFlags();
     void steerStep();                              // 100 ms, from poll()
     void endSteer(bool reached, const QString &detail);  // flags for the next rate/angle command; false (commandError) until the gimbal reported
+    void sendStreamAndFovRequests();
     quint64 detectionStream(int intervalMs);  // returns the tracked command's id
     void updateDetection(const std::optional<det_packet_t> &packet, qint64 packetMs);
     void resetDetection();
@@ -179,6 +183,7 @@ private:
     QHash<QString, qint64> m_settingReads;  // param_id -> last PARAM_EXT_REQUEST_READ (ms)
     qint64 m_listMs = -1;                    // last PARAM_EXT_REQUEST_LIST (ms)
     qint64 m_cameraSeenMs = -1;              // first frame from the camera this connection
+    qint64 m_streamPollMs = -1;              // last pollStreamAndFov() requests (ms)
     struct Steer {
         double pitch, yaw, maxDps;
         qint64 deadlineMs;

@@ -38,15 +38,19 @@ public:
     static constexpr quint8 kPayloadCore = MAV_COMP_ID_USER2;  // source of the SDK's DEBUG parameter stream
 
     void add(const CapturedFrame &c);
-    void clear() { m_last.clear(); m_params.clear(); m_cameraParams.clear(); }
+    void clear() { m_last.clear(); m_params.clear(); m_cameraParams.clear(); m_streams.clear(); m_fovs.clear(); }
 
     const CapturedFrame *latest(quint32 msgid) const;                // newest from any component
     const CapturedFrame *latest(quint32 msgid, quint8 compid) const;
     const QMap<int, Value> &payloadParams() const { return m_params; }  // DEBUG.ind -> value
     const QMap<QString, Value> &cameraParams() const { return m_cameraParams; }  // PARAM_EXT_VALUE param_id -> uint32
+    // Newest frame per stream and per camera: a reply for one must not hide the other
+    const QMap<int, CapturedFrame> &streams() const { return m_streams; }  // VIDEO_STREAM_INFORMATION by stream_id
+    const QMap<int, CapturedFrame> &fovs() const { return m_fovs; }        // CAMERA_FOV_STATUS by camera_device_id
 
 private:
     std::map<std::pair<quint32, quint8>, CapturedFrame> m_last;
     QMap<int, Value> m_params;
     QMap<QString, Value> m_cameraParams;
+    QMap<int, CapturedFrame> m_streams, m_fovs;
 };

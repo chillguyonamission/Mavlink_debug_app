@@ -50,3 +50,9 @@ the boxes. Boxes are per-axis scaled, as the SDK example scales them.
 
 Video and metadata are not synchronised. The packet has a frame counter of its own and no timestamp, so a box can
 lag the picture by the network and decode delay.
+
+## Stream and FOV path
+
+The app registers no SDK stream or status callback for these. `poll()` adds every received frame to `TelemetryStore`,
+which keeps the newest `VIDEO_STREAM_INFORMATION` per `stream_id` and `CAMERA_FOV_STATUS` per `camera_device_id`.
+`TelemetryPage` reads the store at 4 Hz on the GUI thread.

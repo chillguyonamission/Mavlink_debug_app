@@ -11,6 +11,8 @@ Newest first. "Tested" means the hardware-free CTest suite unless a line says ha
   on the existing video view, click to select a box by track ID. Data comes from the SDK's
   `regPayloadDetectionChanged()` callback. Tested with a fake payload; not run on hardware.
 - `hw_vio_commands --steps detection,detection-forward`: built, not run.
+- **Stream and FOV telemetry:** Analyze › Telemetry shows `VIDEO_STREAM_INFORMATION` and `CAMERA_FOV_STATUS`, only while
+  a reply is fresh. Tested with a fake payload; not run on hardware.
 
 ### Not added, on purpose
 

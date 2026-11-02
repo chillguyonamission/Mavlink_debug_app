@@ -83,6 +83,10 @@ void TelemetryStore::add(const CapturedFrame &c)
         quint32 value;  // the uint32 in the first bytes, as the SDK's _handle_msg_param_ext_value() reads it
         memcpy(&value, v.param_value, sizeof value);
         m_cameraParams[QString::fromLatin1(v.param_id, int(strnlen(v.param_id, sizeof v.param_id)))] = {double(value), c.monoNs};
+    } else if (c.frame.msgid == MAVLINK_MSG_ID_VIDEO_STREAM_INFORMATION) {
+        m_streams[mavlink_msg_video_stream_information_get_stream_id(&c.frame.msg)] = c;
+    } else if (c.frame.msgid == MAVLINK_MSG_ID_CAMERA_FOV_STATUS) {
+        m_fovs[mavlink_msg_camera_fov_status_get_camera_device_id(&c.frame.msg)] = c;
     }
 }
 

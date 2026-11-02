@@ -139,7 +139,7 @@ protected:
     void refresh() override;
 
 private:
-    QLabel *m_component, *m_camera, *m_distance;
+    QLabel *m_component, *m_camera, *m_distance, *m_stream, *m_fov;
     QTableWidget *m_params;
 };
 

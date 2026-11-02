@@ -65,6 +65,7 @@ void PayloadLink::connectTo(const QString &ip, int port)
     m_settingReads.clear();
     m_listMs = -1;
     m_cameraSeenMs = -1;
+    m_streamPollMs = -1;
     m_autoInfoSent = false;
     resetDetection();
 
@@ -635,6 +636,38 @@ bool PayloadLink::requestPayloadInfo(bool automatic)
     }
     emit commandsChanged();
     return true;
+}
+
+void PayloadLink::sendStreamAndFovRequests()
+{
+    m_sdk->getPayloadCameraStreamingInformation();  // stream_id 0: every stream
+    m_sdk->getPayloadCameraFOVStatus(CAMERA_EO);
+    m_sdk->getPayloadCameraFOVStatus(CAMERA_IR);
+}
+
+bool PayloadLink::requestStreamAndFov()
+{
+    if (!ready()) return false;
+    const qint64 now = nowMs();
+    m_tracker.expect(QStringLiteral("Request stream information"), MAVLINK_MSG_ID_COMMAND_LONG, MAV_CMD_REQUEST_VIDEO_STREAM_INFORMATION, {}, now, {},
+                     MAVLINK_MSG_ID_VIDEO_STREAM_INFORMATION);
+    for (const camera_type_t cam : {CAMERA_EO, CAMERA_IR})
+        m_tracker.expect(cam == CAMERA_EO ? QStringLiteral("Request EO FOV") : QStringLiteral("Request IR FOV"), MAVLINK_MSG_ID_COMMAND_LONG,
+                         MAV_CMD_REQUEST_MESSAGE, {}, now, [cam](const MavFrame &f) {
+                             return int(mavlink_msg_command_long_get_param1(&f.msg)) == MAVLINK_MSG_ID_CAMERA_FOV_STATUS &&
+                                    int(mavlink_msg_command_long_get_param2(&f.msg)) == int(cam);
+                         }, MAVLINK_MSG_ID_CAMERA_FOV_STATUS);
+    sendStreamAndFovRequests();
+    emit commandsChanged();
+    return true;
+}
+
+void PayloadLink::pollStreamAndFov()
+{
+    const qint64 now = nowMs();
+    if (!m_sdk || !isOpen(m_state) || !m_autoInfoSent || (m_streamPollMs >= 0 && now - m_streamPollMs < 2000)) return;
+    m_streamPollMs = now;
+    sendStreamAndFovRequests();
 }
 
 QString PayloadLink::sdkVersion() { return QStringLiteral(SDK_VERSION); }

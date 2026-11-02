@@ -342,6 +342,101 @@ private slots:
         QVERIFY(!o.attitude && !o.eoZoom && !o.recording && !o.trackStatus && !o.trackBox);
     }
 
+    void streamAndFovAreKeptPerStreamAndCamera()
+    {
+        TelemetryStore s;
+        mavlink_message_t m;
+        char name[32] = "main", uri[160] = "rtsp://x";
+        auto stream = [&](uint8_t id) {
+            mavlink_msg_video_stream_information_pack_chan(1, MAV_COMP_ID_CAMERA, MAVLINK_COMM_0, &m, id, 2, VIDEO_STREAM_TYPE_RTSP, 1, 30, 1280, 720,
+                                                           4000000, 0, 62, name, uri, VIDEO_STREAM_ENCODING_H264, 0);
+            return frameOf(m, CapturedFrame::Rx, 10 + id);
+        };
+        auto fov = [&](uint8_t device, float h, float v) {
+            const float q[4] = {1, 0, 0, 0};
+            mavlink_msg_camera_fov_status_pack_chan(1, MAV_COMP_ID_CAMERA, MAVLINK_COMM_0, &m, 0, 0, 0, 0, 0, 0, 0, q, h, v, device);
+            return frameOf(m, CapturedFrame::Rx, 20);
+        };
+        s.add(stream(1));
+        s.add(stream(2));
+        s.add(fov(0, 62, 35));
+        s.add(fov(1, 24, 18));
+        s.add(fov(1, 25, 19));  // the newest for this camera replaces the older one
+        QCOMPARE(s.streams().size(), 2);
+        QCOMPARE(s.fovs().size(), 2);
+        const MavFrame &f = s.streams().value(2).frame;
+        QCOMPARE(fieldNumber(f, "resolution_h").value_or(0), 1280.0);
+        QCOMPARE(fieldNumber(f, "resolution_v").value_or(0), 720.0);
+        QCOMPARE(fieldNumber(f, "bitrate").value_or(0), 4000000.0);
+        QCOMPARE(fieldNumber(f, "encoding").value_or(0), double(VIDEO_STREAM_ENCODING_H264));
+        QCOMPARE(fieldText(f, "uri"), QStringLiteral("rtsp://x"));
+        QCOMPARE(fieldNumber(s.fovs().value(1).frame, "hfov").value_or(0), 25.0);
+        s.add(frameOf(m, CapturedFrame::Tx, 30));  // TX is never telemetry
+        QCOMPARE(fieldNumber(s.fovs().value(1).frame, "hfov").value_or(0), 25.0);
+        s.clear();
+        QVERIFY(s.streams().isEmpty() && s.fovs().isEmpty());
+    }
+
+    void streamAndFovRequestsOnTheWire()
+    {
+        PayloadLink link;
+        QVERIFY(!link.requestStreamAndFov());
+        FakePayload fake;
+        link.connectTo(QStringLiteral("127.0.0.1"), fake.port);
+        QTRY_STATE(link, LinkState::SocketOpen, 5000);
+        QVERIFY(fake.learnAppEndpoint());
+        link.pollStreamAndFov();  // the camera has not been heard: the SDK would address the wrong component
+        auto streamReq = [](const MavFrame &x) {
+            return x.msgid == MAVLINK_MSG_ID_COMMAND_LONG && mavlink_msg_command_long_get_command(&x.msg) == MAV_CMD_REQUEST_VIDEO_STREAM_INFORMATION;
+        };
+        auto fovReq = [](const MavFrame &x, float cam) {
+            return x.msgid == MAVLINK_MSG_ID_COMMAND_LONG && mavlink_msg_command_long_get_command(&x.msg) == MAV_CMD_REQUEST_MESSAGE &&
+                   int(mavlink_msg_command_long_get_param1(&x.msg)) == MAVLINK_MSG_ID_CAMERA_FOV_STATUS && mavlink_msg_command_long_get_param2(&x.msg) == cam;
+        };
+        QVERIFY(!waitTx(fake, streamReq, nullptr, 300));
+
+        fake.sendHeartbeat(MAV_COMP_ID_CAMERA, MAV_TYPE_CAMERA);
+        fake.sendHeartbeat(TelemetryStore::kPayloadCore, MAV_TYPE_GENERIC);
+        QTRY_VERIFY_WITH_TIMEOUT(find(link, QStringLiteral("Auto: Request component info")), 3000);
+        QTest::qWait(1000);
+        fake.received();
+
+        MavFrame f;
+        QVERIFY(link.requestStreamAndFov());
+        QVERIFY(waitTx(fake, streamReq, &f));
+        QCOMPARE(int(f.targetComponent), int(MAV_COMP_ID_CAMERA));
+        QCOMPARE(mavlink_msg_command_long_get_param1(&f.msg), 0.f);  // every stream
+        QVERIFY(waitTx(fake, [&](const MavFrame &x) { return fovReq(x, 0); }, &f));
+        QCOMPARE(int(f.targetComponent), int(MAV_COMP_ID_CAMERA));
+        QVERIFY(waitTx(fake, [&](const MavFrame &x) { return fovReq(x, 1); }));
+        QTRY_VERIFY_WITH_TIMEOUT(find(link, QStringLiteral("Request IR FOV"))->state == TrackedCommand::Sent, 3000);
+
+        // Each is answered by its message, with no ACK; the answer is told apart from an ACK
+        mavlink_message_t m;
+        char name[32] = {0}, uri[160] = {0};
+        mavlink_msg_video_stream_information_pack_chan(1, MAV_COMP_ID_CAMERA, MAVLINK_COMM_0, &m, 1, 1, 0, 0, 30, 1280, 720, 0, 0, 0, name, uri, 0, 0);
+        fake.send(m);
+        QTRY_VERIFY_WITH_TIMEOUT(find(link, QStringLiteral("Request stream information"))->state == TrackedCommand::Answered, 3000);
+        QCOMPARE(link.telemetry().streams().size(), 1);
+        const float q[4] = {1, 0, 0, 0};
+        mavlink_msg_camera_fov_status_pack_chan(1, MAV_COMP_ID_CAMERA, MAVLINK_COMM_0, &m, 0, 0, 0, 0, 0, 0, 0, q, 62, 35, 0);
+        fake.send(m);
+        QTRY_VERIFY_WITH_TIMEOUT(find(link, QStringLiteral("Request EO FOV"))->state == TrackedCommand::Answered, 3000);
+        QCOMPARE(find(link, QStringLiteral("Request IR FOV"))->state, TrackedCommand::Sent);  // one reply answers one request
+        fake.send(commandAck(MAV_COMP_ID_CAMERA, MAV_CMD_REQUEST_VIDEO_STREAM_INFORMATION, MAV_RESULT_FAILED));
+        QTRY_VERIFY_WITH_TIMEOUT(find(link, QStringLiteral("Request stream information"))->state == TrackedCommand::Rejected, 3000);
+        QTRY_VERIFY_WITH_TIMEOUT(find(link, QStringLiteral("Request IR FOV"))->state == TrackedCommand::AckTimeout, 6000);  // unanswered is reported
+
+        // The poll is throttled and adds nothing to the command log
+        const size_t tracked = link.tracker().commands().size();
+        fake.received();
+        link.pollStreamAndFov();
+        QVERIFY(waitTx(fake, streamReq));
+        link.pollStreamAndFov();
+        QVERIFY(!waitTx(fake, streamReq, nullptr, 500));
+        QCOMPARE(link.tracker().commands().size(), tracked);
+    }
+
     void commandsOnTheWire()
     {
         PayloadLink link;

@@ -100,3 +100,24 @@ detection** first stops an armed tracker, so a later click cannot send a target 
   coordinates fit the picture is unknown; the panel warns when the payload reports another view.
 - Disconnecting leaves `TRACK_MODE` and the stream as they were on the payload, the same way tracking is left.
 - The firmware needed for detection is not documented anywhere in the SDK.
+
+## Stream and FOV telemetry
+
+Read-only. **SDK API** for the requests, **standard MAVLink** for the messages, **application side** for the display.
+
+| Action | App call | SDK call | On the wire | Answer |
+|---|---|---|---|---|
+| Stream | `requestStreamAndFov()` | `getPayloadCameraStreamingInformation()` | `COMMAND_LONG` `MAV_CMD_REQUEST_VIDEO_STREAM_INFORMATION`, param1 = 0 (all), to the camera | `VIDEO_STREAM_INFORMATION` |
+| FOV | same | `getPayloadCameraFOVStatus(CAMERA_EO)`, `(CAMERA_IR)` | `COMMAND_LONG` `MAV_CMD_REQUEST_MESSAGE`, param1 = 271, param2 = 0 or 1, to the camera | `CAMERA_FOV_STATUS` |
+
+- **Workflow:** the button sends tracked requests. While Analyze › Telemetry is open, `pollStreamAndFov()` repeats them
+  every 2 s without adding to the command log, once the camera has been heard (before that the SDK addresses the wrong
+  component). The SDK's own FOV example polls at 2 Hz.
+- **Response and ACK are separate:** the requested message gives the state *Answered*; a `COMMAND_ACK` is recorded on
+  top. One reply answers one request. An unanswered request ends in *No ACK (timeout)*.
+- **Display:** values come from CRC-valid received frames. They show only while the newest reply is younger than the link
+  timeout (at least 3 s, since replies come at most every 2 s). After that only the age is shown.
+- **Bitrate:** taken from the received message. `getPayloadStreamBitrate()` is not used, since it always returns 0.
+- **Not assumed:** `param2` for FOV is a Gremsy use of a standard field. How `camera_device_id` in the reply maps to EO and
+  IR is unverified, so the raw number is shown. MAVLink defines 0 as "a MAVLink camera", so EO and IR replies could share
+  an ID, in which case the newer one replaces the older.

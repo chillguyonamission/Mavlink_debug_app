@@ -287,6 +287,62 @@ private slots:
         QVERIFY(ip->isEnabled());
     }
 
+    // Analyze › Telemetry shows stream and FOV values only after a reply, and only while it is fresh
+    void telemetryPageShowsFreshStreamAndFov()
+    {
+        FakePayload fake;
+        MainWindow w;
+        w.show();
+        w.findChild<QLineEdit *>(QStringLiteral("ipEdit"))->setText(QStringLiteral("127.0.0.1"));
+        w.findChild<QSpinBox *>(QStringLiteral("portSpin"))->setValue(fake.port);
+        w.findChild<QPushButton *>(QStringLiteral("connectButton"))->click();
+        QTRY_VERIFY_WITH_TIMEOUT(isOpen(w.link()->state()), 5000);
+        QVERIFY(fake.learnAppEndpoint());
+        fake.sendHeartbeat(MAV_COMP_ID_CAMERA, MAV_TYPE_CAMERA);
+        fake.sendHeartbeat(MAV_COMP_ID_USER2, MAV_TYPE_GENERIC);
+        auto *page = w.findChild<TelemetryPage *>();
+        QVERIFY(page);
+        auto label = [&](const QString &text) {
+            for (QLabel *l : page->findChildren<QLabel *>()) if (l->text().contains(text)) return l;
+            return static_cast<QLabel *>(nullptr);
+        };
+        auto polled = [&](int ms) {
+            QElapsedTimer t;
+            t.start();
+            while (t.elapsed() < ms) {
+                for (const MavFrame &f : fake.received())
+                    if (f.msgid == MAVLINK_MSG_ID_COMMAND_LONG && mavlink_msg_command_long_get_command(&f.msg) == MAV_CMD_REQUEST_VIDEO_STREAM_INFORMATION) return true;
+                QTest::qWait(10);
+            }
+            return false;
+        };
+        QVERIFY(!polled(1000));  // the page is hidden on Operate: no requests
+
+        w.findChild<QPushButton *>(QStringLiteral("navAnalyze"))->click();
+        w.findChild<QTabWidget *>(QStringLiteral("analyzeTabs"))->setCurrentWidget(page);
+        QVERIFY(polled(4000));
+        QTest::qWait(300);
+        QVERIFY(!label(QStringLiteral("rtsp://")));  // asked, nothing received: nothing shown
+
+        mavlink_message_t m;
+        char name[32] = "main", uri[160] = "rtsp://192.168.55.1:8554/payload";
+        mavlink_msg_video_stream_information_pack_chan(1, MAV_COMP_ID_CAMERA, MAVLINK_COMM_0, &m, 1, 1, VIDEO_STREAM_TYPE_RTSP, 1, 30, 1280, 720, 4000000, 0, 62, name, uri,
+                                                       VIDEO_STREAM_ENCODING_H264, 0);
+        fake.send(m);
+        const float q[4] = {1, 0, 0, 0};
+        mavlink_msg_camera_fov_status_pack_chan(1, MAV_COMP_ID_CAMERA, MAVLINK_COMM_0, &m, 0, 0, 0, 0, 0, 0, 0, q, 62.5f, NAN, 1);
+        fake.send(m);
+        QTRY_VERIFY_WITH_TIMEOUT(label(QStringLiteral("rtsp://192.168.55.1:8554/payload")), 3000);
+        QVERIFY(label(QStringLiteral("1280×720 · 30.0 fps · 4.00 Mbit/s")));
+        QTRY_VERIFY_WITH_TIMEOUT(label(QStringLiteral("camera device 1: H 62.5°, V unknown")), 3000);
+
+        QTRY_VERIFY_WITH_TIMEOUT(!label(QStringLiteral("rtsp://")) && label(QStringLiteral("no fresh reply")), 5000);  // the fake stopped answering
+        QVERIFY(!label(QStringLiteral("62.5")));
+        w.findChild<QPushButton *>(QStringLiteral("connectButton"))->click();
+        QTRY_COMPARE_WITH_TIMEOUT(w.link()->state(), LinkState::Disconnected, 3000);
+        w.findChild<QPushButton *>(QStringLiteral("navOperate"))->click();
+    }
+
     // Enable, boxes on the video, select one: nothing reaches the tracker. Select target ends detection; Enable disarms.
     void detectionWorkflowNeverTriggersTracking()
     {

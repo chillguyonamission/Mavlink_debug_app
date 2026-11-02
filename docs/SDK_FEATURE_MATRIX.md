@@ -44,7 +44,7 @@ Every public `PayloadSdkInterface` API in `fba3c70`, and what this app does with
 | `setPayloadCameraCaptureImage`, `setPayloadCameraRecordVideoStart`, `setPayloadCameraRecordVideoStop` | Implemented | no | SD writes not yet approved for a hardware run |
 | `setPayloadCameraStopImage` | Available, unused | | The app takes single shots |
 | `getPayloadCameraMode`, `getPayloadStorage`, `getPayloadCaptureStatus`, `getPayloadCameraInformation`, `getPayloadComponentBasicInformation` | Implemented | yes | |
-| `getPayloadCameraStreamingInformation`, `getPayloadCameraFOVStatus` | Available, unused | | |
+| `getPayloadCameraStreamingInformation`, `getPayloadCameraFOVStatus` | Implemented | no | Read-only, Analyze › Telemetry. ZIO has no IR, so its IR request should go unanswered |
 | `setPayloadCameraFFCMode`, `setPayloadCameraFFCTrigg`, `setPayloadCameraWBOnePushTrigg` | Available, unused | | |
 | `getPayloadCameraFFCMode` | Unsupported | | Empty body: it returns nothing |
 | `setCameraExtSettings_SpotAE_*` | Needs verification | | OrusL only; no unit to check on |
@@ -54,7 +54,7 @@ Every public `PayloadSdkInterface` API in `fba3c70`, and what this app does with
 | API | Status | HW | Notes |
 |---|---|---|---|
 | `setPayloadStreamBitrate`, `setPayloadStreamResolution`, `setPayloadStreamProfile` | Needs verification | | |
-| `getPayloadStreamBitrate` | Unsupported | | Requests stream information and always returns 0 |
+| `getPayloadStreamBitrate` | Unsupported | | Requests stream information and always returns 0. The app shows the bitrate from the received `VIDEO_STREAM_INFORMATION` instead |
 
 ## Gimbal
 
