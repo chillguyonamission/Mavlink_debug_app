@@ -4,6 +4,7 @@
 
 #include "captured_frame.h"
 #include "command_tracker.h"
+#include "detection.h"
 #include "link_health.h"
 #include "telemetry.h"
 
@@ -98,6 +99,14 @@ public:
     // Centre and size in tracker pixels. Also sends gimbal rate 0 and mode ACTIVE first (see the definition).
     bool trackingTarget(double x, double y, double w = 128, double h = 128);
     bool trackingStreams();  // TRK_* DEBUG parameters every 100 ms, the example's rate
+
+    // Onboard object detection, not tracking, though both are values of TRACK_MODE. As the SDK's
+    // payload_get_bounding_box_detection example: set the mode, 500 ms later ask for V2_EXTENSION every 100 ms.
+    bool detectionEnable(const char *modeId, quint32 detectionValue);
+    bool detectionStop();  // stream rate 0, as the example does; the caller decides what TRACK_MODE becomes
+    bool detectionEnabled() const { return m_detEnabledMs >= 0; }
+    DetectionState detectionStatus() const { return m_detState; }
+    const DetectionFrame &detections() const { return m_detFrame; }  // empty unless packets are arriving
     QString commandError() const { return m_commandError; }
 
     const CommandTracker &tracker() const { return m_tracker; }
@@ -117,6 +126,7 @@ signals:
     void framesCaptured(const std::vector<CapturedFrame> &frames);  // GUI thread, in observation order
     void commandsChanged();
     void angleFinished(bool reached, const QString &detail);  // gimbalAngle() ended; detail also in commandError()
+    void detectionsChanged();  // GUI thread: a new packet or a new detectionStatus()
 
 private:
     void onTransport(int dir, const uint8_t *data, int len, const sockaddr_in *peer, int sysErrno);
@@ -126,6 +136,9 @@ private:
     bool setMotionFlags();
     void steerStep();                              // 100 ms, from poll()
     void endSteer(bool reached, const QString &detail);  // flags for the next rate/angle command; false (commandError) until the gimbal reported
+    quint64 detectionStream(int intervalMs);  // returns the tracked command's id
+    void updateDetection(const std::optional<det_packet_t> &packet, qint64 packetMs);
+    void resetDetection();
     template <class Work, class Done> void runInWorker(Work work, Done done);
 
     struct Datagram {
@@ -143,6 +156,8 @@ private:
     std::vector<Datagram> m_pending;
     quint64 m_nextSeq = 0;
     std::atomic<quint64> m_dropped{0};
+    std::optional<det_packet_t> m_detPacket;  // newest only: a slow GUI skips packets, it never queues them
+    qint64 m_detPacketMs = -1;
 
     // GUI thread only
     const MavlinkDict *m_dict = nullptr;
@@ -171,4 +186,8 @@ private:
     std::optional<Steer> m_steer;
     quint16 m_modeFlags = 0;  // last mode commanded by gimbalMode()
     qint64 m_modeFlagsMs = -1;
+    DetectionFrame m_detFrame;
+    DetectionState m_detState = DetectionState::Off;
+    qint64 m_detEnabledMs = -1, m_detLastMs = -1;
+    quint64 m_detModeCmd = 0, m_detStreamCmd = 0;  // tracked commands whose rejection means "refused"
 };

@@ -16,6 +16,8 @@
 #include <QTimer>
 #include <QVBoxLayout>
 
+#include <algorithm>
+
 void VideoView::setImage(const QImage &img)
 {
     m_image = img;
@@ -43,6 +45,20 @@ void VideoView::setPickMode(bool on)
     setCursor(on ? Qt::CrossCursor : Qt::ArrowCursor);
 }
 
+void VideoView::setDetections(std::vector<DetectionBox> boxes)
+{
+    m_detections = std::move(boxes);
+    update();
+}
+
+void VideoView::selectDetection(quint16 trackId)
+{
+    if (trackId == m_selected) return;
+    m_selected = trackId;
+    update();
+    emit detectionSelected(trackId);
+}
+
 QRect VideoView::pictureRect() const
 {
     if (m_image.isNull()) return rect();
@@ -53,6 +69,11 @@ QRect VideoView::pictureRect() const
 void VideoView::mousePressEvent(QMouseEvent *e)
 {
     const QRect r = pictureRect();
+    if (!m_pick && !m_detections.empty() && !m_image.isNull() && e->button() == Qt::LeftButton) {
+        const DetectionBox *b = detectionAt(m_detections, e->position(), r);
+        selectDetection(b ? b->trackId : 0);
+        return;
+    }
     if (!m_pick || m_image.isNull() || e->button() != Qt::LeftButton || !r.contains(e->position().toPoint())) {
         QWidget::mousePressEvent(e);
         return;
@@ -86,9 +107,29 @@ void VideoView::paintEvent(QPaintEvent *)
                           m_box.width() * r.width(), m_box.height() * r.height()));
     }
 
-    // Overlay lines, stacked from each corner of the picture on a dark backing for legibility
     p.setFont(monoFont(9));
     const QFontMetrics fm(p.font());
+    if (!m_image.isNull()) {  // no frame, no picture to place boxes on
+        p.setBrush(Qt::NoBrush);
+        for (const DetectionBox &b : m_detections) {
+            const bool selected = b.trackId && b.trackId == m_selected;
+            const QColor color(selected ? Theme::Accent : Theme::Warn);
+            const QRectF box = detectionRectInPicture(b.rect, r);
+            p.setPen(QPen(color, selected ? 3 : 2));
+            p.drawRect(box);
+            const QString label = detectionLabel(b);
+            // Above the box, or inside it when the box touches the top of the picture
+            const int w = fm.horizontalAdvance(label) + 8, h = fm.height() + 2;
+            QRect tag(int(box.left()), int(box.top()) - h, w, h);
+            if (tag.top() < r.top()) tag.moveTop(int(box.top()));
+            tag.moveLeft(std::clamp(tag.left(), r.left(), std::max(r.left(), r.right() - w)));
+            p.fillRect(tag, QColor(5, 9, 16, 175));
+            p.setPen(color);
+            p.drawText(tag, Qt::AlignCenter, label);
+        }
+    }
+
+    // Overlay lines, stacked from each corner of the picture on a dark backing for legibility
     const int pad = 6, lineH = fm.height() + 6;
     for (const Qt::Alignment corner : {Qt::AlignTop | Qt::AlignLeft, Qt::AlignTop | Qt::AlignRight,
                                        Qt::AlignBottom | Qt::AlignLeft, Qt::AlignBottom | Qt::AlignRight}) {

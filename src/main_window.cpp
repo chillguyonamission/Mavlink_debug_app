@@ -219,6 +219,11 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_ip, &QLineEdit::textChanged, m_video, &VideoPage::setPayloadIp);
     m_video->setPayloadIp(m_ip->text());
     connect(m_video->view(), &VideoView::picked, this, [this](QPointF p) { m_camera->trackAt(p); });
+    connect(m_video->view(), &VideoView::detectionSelected, this, [this](quint16 id) { m_camera->setSelectedDetection(id); });
+    connect(m_link, &PayloadLink::detectionsChanged, this, [this] {
+        m_video->view()->setDetections(m_link->detections().boxes);
+        if (!detectionLive(m_link->detectionStatus())) m_video->view()->selectDetection(0);
+    });
     m_gimbalCol = column(new QWidget);  // pages: setModel()
     m_cameraCol = column(new QWidget);
 
@@ -483,6 +488,7 @@ void MainWindow::setModel(const PayloadProfile &p)
     m_profile = &p;
     const MavlinkDict *dict = m_dict.isLoaded() ? &m_dict : nullptr;
     m_video->view()->setPickMode(false);
+    m_video->view()->selectDetection(0);
     m_camera = new CameraPage(m_link, dict, p);
     connect(m_camera, &CameraPage::trackArmedChanged, m_video->view(), &VideoView::setPickMode);
     for (const auto &[col, page] : {std::pair<QScrollArea *, QWidget *>{m_gimbalCol, new GimbalPage(m_link, dict, p)}, {m_cameraCol, m_camera}}) {
@@ -663,5 +669,9 @@ void MainWindow::refreshOperator()
                          o.trackBox->width() / PayloadLink::kTrackerWidth, o.trackBox->height() / PayloadLink::kTrackerHeight);
     }
     if (m_camera->trackArmed()) hud.push_back({br, QStringLiteral("CLICK AN OBJECT TO TRACK"), QColor(Theme::Accent)});
+    if (const DetectionState ds = m_link->detectionStatus(); ds != DetectionState::Off)
+        hud.push_back({br, QStringLiteral("DET ") + detectionStateText(ds).toUpper() +
+                               (ds == DetectionState::Boxes ? QStringLiteral(" %1").arg(m_link->detections().boxes.size()) : QString()),
+                       detectionLive(ds) ? text : QColor(Theme::Warn)});
     m_video->view()->setHud(std::move(hud), box, boxColor);
 }

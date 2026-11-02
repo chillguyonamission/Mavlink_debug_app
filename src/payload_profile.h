@@ -34,6 +34,8 @@ struct PayloadProfile {
     std::vector<ParamOption> gimbalModes;
     const char *trackingModeId;  // PARAM_EXT_SET that selects object tracking before arming the tracker
     unsigned trackingObjectMode;
+    unsigned trackingDetectionMode;  // the same parameter's value for onboard object detection: the two exclude each other
+    unsigned viewSourceEo;           // the EO-only view, the one the SDK's detection example selects
     std::vector<CameraSetting> cameraSettings;
     // The payload's gimbal control source: gimbal commands from this app pass only when it is gimbalControlOnboard
     const char *gimbalControlId = nullptr;

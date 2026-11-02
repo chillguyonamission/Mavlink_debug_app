@@ -41,8 +41,8 @@ target_compile_options(mavcore PRIVATE -Wall -Wextra)
 add_library(appcore STATIC
     src/link_health.cpp src/payload_link.cpp src/frame_model.cpp src/frame_filter.cpp
     src/frame_text.cpp src/frame_writer.cpp src/flow_stats.cpp src/mavlink_dict.cpp
-    src/command_tracker.cpp src/telemetry.cpp src/payload_profile_vio.cpp src/payload_profile_zio.cpp src/payload_profile_mb1.cpp src/payload_profile_orusl.cpp src/profiles.cpp src/pcap_capture.cpp)
-target_include_directories(appcore PUBLIC src)
+    src/command_tracker.cpp src/telemetry.cpp src/detection.cpp src/payload_profile_vio.cpp src/payload_profile_zio.cpp src/payload_profile_mb1.cpp src/payload_profile_orusl.cpp src/profiles.cpp src/pcap_capture.cpp)
+target_include_directories(appcore PUBLIC src ${SDK_DIR}/libs)  # libs: detection_packet.h, which has no other SDK dependency
 target_link_libraries(appcore PUBLIC Qt6::Gui mavcore PkgConfig::PCAP PRIVATE PayloadSDK)
 target_compile_options(appcore PRIVATE -Wall -Wextra)
 # XML definitions matching the generated headers; see MavlinkDict::defaultDir()
@@ -77,7 +77,7 @@ if(GSTRTSPSERVER_FOUND)
     set_tests_properties(video PROPERTIES TIMEOUT 60 ENVIRONMENT QT_QPA_PLATFORM=offscreen)
 endif()
 
-foreach(t link_logic payload_link inspector payload_control pcap main_window)
+foreach(t link_logic payload_link inspector payload_control pcap main_window detection)
     add_executable(test_${t} tests/test_${t}.cpp)
     target_link_libraries(test_${t} PRIVATE Qt6::Test appgui)
     add_test(NAME ${t} COMMAND test_${t})

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "detection.h"
+
 #include <QColor>
 #include <QImage>
 #include <QRectF>
@@ -32,18 +34,24 @@ public:
     // box: a rectangle in 0..1 picture coordinates (empty = none)
     void setHud(std::vector<HudText> items, const QRectF &box = {}, const QColor &boxColor = {});
     void setPickMode(bool on);  // a click then emits picked()
+    void setDetections(std::vector<DetectionBox> boxes);  // drawn over the picture; replaces the previous ones
+    // Outside pick mode a click selects the box under it by track ID (0 = none). Selecting never sends anything.
+    void selectDetection(quint16 trackId);
+    quint16 selectedDetection() const { return m_selected; }
+    QRect pictureRect() const;  // where the frame is painted, aspect-fitted: every overlay maps through it
 
 signals:
     void picked(QPointF pos);  // 0..1 picture coordinates
+    void detectionSelected(quint16 trackId);
 
 protected:
     void paintEvent(QPaintEvent *) override;
     void mousePressEvent(QMouseEvent *e) override;
 
 private:
-    QRect pictureRect() const;
-
     QImage m_image;
+    std::vector<DetectionBox> m_detections;
+    quint16 m_selected = 0;
     QString m_message = QStringLiteral("No video");
     std::vector<HudText> m_hud;
     QRectF m_box;

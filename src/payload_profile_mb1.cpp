@@ -61,6 +61,8 @@ const PayloadProfile &mb1Profile()
          {PAYLOAD_CAMERA_GIMBAL_MODE_RESET, "RESET"}},
         PAYLOAD_CAMERA_TRACKING_MODE,
         PAYLOAD_CAMERA_TRACKING_OBJ_TRACKING,
+        PAYLOAD_CAMERA_TRACKING_OBJ_DETECTION,
+        PAYLOAD_CAMERA_VIEW_EO,
         {
             {"Exposure", "Camera profile", PAYLOAD_CAMERA_EO_PROFILE,
              {{PAYLOAD_CAMERA_EO_PROFILE_CUSTOM, "Custom (settings below)"},

@@ -83,6 +83,7 @@ public:
     // "Armed" = Select target was pressed: the tracker is active and a click on the video picks the target.
     bool trackArmed() const { return m_trackArmed; }
     void trackAt(QPointF pos);  // 0..1 picture coordinates; only while armed
+    void setSelectedDetection(quint16 trackId) { m_selectedDetection = trackId; }  // shown, never sent anywhere
 
 signals:
     void trackArmedChanged(bool armed);
@@ -99,9 +100,10 @@ private:
     QSlider *m_zoomRange;
     QPushButton *m_recBtn, *m_armBtn = nullptr, *m_centreBtn = nullptr;
     QDialog *m_settingsDialog = nullptr;
-    QLabel *m_zoomReadout, *m_track = nullptr;
+    QLabel *m_zoomReadout, *m_track = nullptr, *m_detection = nullptr;
     QLabel *m_capture, *m_video, *m_storage, *m_settings, *m_reported;
     bool m_trackArmed = false;
+    quint16 m_selectedDetection = 0;
 };
 
 // Every camera setting in the profile, showing what the camera reports (PARAM_EXT_VALUE). Opened as a dialog

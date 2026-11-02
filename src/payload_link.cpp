@@ -66,6 +66,7 @@ void PayloadLink::connectTo(const QString &ip, int port)
     m_listMs = -1;
     m_cameraSeenMs = -1;
     m_autoInfoSent = false;
+    resetDetection();
 
     T_ConnInfo ci{};
     ci.type = CONTROL_UDP;
@@ -74,6 +75,11 @@ void PayloadLink::connectTo(const QString &ip, int port)
     m_sdk = new PayloadSdkInterface(ci);
     m_sdk->regTransportObserver([this](int dir, const uint8_t *d, int len, const sockaddr_in *peer, int err) {
         onTransport(dir, d, len, peer, err);
+    });
+    m_sdk->regPayloadDetectionChanged([this](const det_packet_t &pkt) {  // SDK receive thread: latch only
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_detPacket = pkt;
+        m_detPacketMs = monoNs() / 1000000;
     });
 
     setState(LinkState::Connecting);
@@ -101,6 +107,7 @@ void PayloadLink::disconnectLink()
     runInWorker([sdk] { delete sdk; return true; },
                 [this](bool) {
                     poll();  // frames observed right before the threads stopped
+                    resetDetection();
                     m_openSinceMs = -1;
                     setState(LinkState::Disconnected);
                 });
@@ -124,9 +131,13 @@ void PayloadLink::onTransport(int dir, const uint8_t *data, int len, const socka
 void PayloadLink::poll()
 {
     std::vector<Datagram> batch;
+    std::optional<det_packet_t> detPacket;
+    qint64 detPacketMs;
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         batch.swap(m_pending);
+        detPacket.swap(m_detPacket);
+        detPacketMs = m_detPacketMs;
     }
 
     std::vector<CapturedFrame> out;
@@ -165,6 +176,7 @@ void PayloadLink::poll()
     steerStep();
     if (!out.empty()) emit framesCaptured(out);
     if (commands) emit commandsChanged();
+    updateDetection(detPacket, detPacketMs);
 
     // Once per connection, as Gremsy's ui_demo does: ask for info and start the parameter streams. The SDK addresses
     // the camera at compid 101 until its own message thread has handled a camera frame, which comes after this
@@ -472,6 +484,76 @@ bool PayloadLink::trackingStreams()
     }
     emit commandsChanged();
     return true;
+}
+
+quint64 PayloadLink::detectionStream(int intervalMs)
+{
+    const quint64 id = m_tracker.expect(intervalMs ? QStringLiteral("Detection stream every %1 ms").arg(intervalMs) : QStringLiteral("Detection stream: stop"),
+                                        MAVLINK_MSG_ID_COMMAND_LONG, MAV_CMD_SET_MESSAGE_INTERVAL, {}, nowMs(), [us = intervalMs * 1000](const MavFrame &f) {
+                                            return int(mavlink_msg_command_long_get_param1(&f.msg)) == MAVLINK_MSG_ID_V2_EXTENSION &&
+                                                   int(mavlink_msg_command_long_get_param2(&f.msg)) == us;
+                                        });
+    m_sdk->sendPayloadRequestStreamRate(MAVLINK_MSG_ID_V2_EXTENSION, uint16_t(intervalMs));
+    emit commandsChanged();
+    return id;
+}
+
+bool PayloadLink::detectionEnable(const char *modeId, quint32 detectionValue)
+{
+    if (!cameraParam(QStringLiteral("Detection mode"), modeId, detectionValue)) return false;
+    const quint64 modeCmd = m_tracker.commands().back().id;
+    resetDetection();
+    m_detModeCmd = modeCmd;
+    const qint64 enabled = m_detEnabledMs = nowMs();
+    QTimer::singleShot(500, this, [this, enabled] {
+        if (m_detEnabledMs != enabled || !m_sdk || !isOpen(m_state)) return;  // stopped or reconnected meanwhile
+        m_detStreamCmd = detectionStream(100);
+    });
+    updateDetection({}, -1);
+    return true;
+}
+
+bool PayloadLink::detectionStop()
+{
+    if (!ready()) return false;
+    detectionStream(0);
+    resetDetection();
+    return true;
+}
+
+void PayloadLink::updateDetection(const std::optional<det_packet_t> &packet, qint64 packetMs)
+{
+    bool changed = false;
+    if (packet) {
+        m_detFrame = parseDetectionPacket(*packet);
+        m_detLastMs = packetMs;
+        changed = true;
+    }
+    bool rejected = false;
+    for (const TrackedCommand &t : m_tracker.commands())
+        rejected |= (t.id == m_detModeCmd || t.id == m_detStreamCmd) && t.state == TrackedCommand::Rejected;
+    const DetectionState s = detectionState(m_detEnabledMs, m_detLastMs, int(m_detFrame.boxes.size()), rejected, nowMs());
+    if (s != m_detState) {
+        m_detState = s;
+        if (!detectionLive(s)) m_detFrame = {};  // old boxes must not outlive the packets
+        changed = true;
+    }
+    if (changed) emit detectionsChanged();
+}
+
+void PayloadLink::resetDetection()
+{
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_detPacket.reset();
+    }
+    m_detEnabledMs = m_detLastMs = -1;
+    m_detModeCmd = m_detStreamCmd = 0;
+    m_detFrame = {};
+    if (m_detState != DetectionState::Off) {
+        m_detState = DetectionState::Off;
+        emit detectionsChanged();
+    }
 }
 
 QString trackingStateText(int mode, int status)

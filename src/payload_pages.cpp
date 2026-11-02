@@ -26,6 +26,7 @@
 #include <algorithm>
 #include <limits>
 #include <cmath>
+#include <optional>
 
 // ---------------------------------------------------------------------------------------------
 
@@ -412,6 +413,7 @@ CameraPage::CameraPage(PayloadLink *link, const MavlinkDict *dict, const Payload
         QPushButton *release = button(QStringLiteral("Stop tracking"), QStringLiteral("Stops tracking (MAV_CMD_USER_4, mode STOP). "
                                                                                       "The gimbal stays where it is."));
         connect(m_armBtn, &QPushButton::clicked, this, [this] {
+            if (m_link->detectionEnabled()) m_link->detectionStop();  // this TRACK_MODE turns the detector off
             const bool ok = m_link->cameraParam(QStringLiteral("Tracking mode: object"), m_profile.trackingModeId, m_profile.trackingObjectMode) &&
                             m_link->trackingStreams() && m_link->trackingMode(PayloadLink::TrackActive);
             report(ok);
@@ -428,6 +430,37 @@ CameraPage::CameraPage(PayloadLink *link, const MavlinkDict *dict, const Payload
         tracking->addWidget(m_centreBtn, 0, 1);
         tracking->addWidget(release, 0, 2);
         tracking->addWidget(m_track, 1, 0, 1, 3);
+    }
+
+    // Object detection, as in the SDK's payload_get_bounding_box_detection example. Its boxes are never sent to the
+    // tracker: no source says the tracker takes a target while TRACK_MODE is detection, on any model.
+    auto *detection = new QGridLayout;
+    if (m_profile.trackingModeId) {
+        QPushButton *detOn = button(QStringLiteral("Enable detection"),
+                                    QStringLiteral("PARAM_EXT_SET %1 = %2, then V2_EXTENSION every 100 ms. This app paints the reported boxes "
+                                                   "on the video. Stops tracking: both use this parameter.")
+                                        .arg(QLatin1String(m_profile.trackingModeId)).arg(m_profile.trackingDetectionMode), "primary");
+        QPushButton *detOff = button(QStringLiteral("Disable detection"),
+                                     QStringLiteral("Stops the V2_EXTENSION stream and sets %1 = %2 (object tracking)")
+                                         .arg(QLatin1String(m_profile.trackingModeId)).arg(m_profile.trackingObjectMode));
+        connect(detOn, &QPushButton::clicked, this, [this] {
+            if (m_trackArmed) {  // a later click on the video must select a box, not send a tracker target
+                m_link->trackingMode(PayloadLink::TrackStop);
+                setTrackArmed(false);
+            }
+            report(m_link->detectionEnable(m_profile.trackingModeId, m_profile.trackingDetectionMode));
+        });
+        connect(detOff, &QPushButton::clicked, this, [this] {
+            report(m_link->detectionStop() &&
+                   m_link->cameraParam(QStringLiteral("Detection off: object tracking mode"), m_profile.trackingModeId, m_profile.trackingObjectMode));
+        });
+        m_detection = valueLabel();
+        m_detection->setWordWrap(true);
+        detection->addWidget(detOn, 0, 0);
+        detection->addWidget(detOff, 0, 1);
+        detection->addWidget(m_detection, 1, 0, 1, 2);
+    } else {
+        detection->addWidget(new QLabel(QStringLiteral("Detection not supported by %1").arg(QLatin1String(m_profile.name))), 0, 0);
     }
 
     // Settings: sent only on a user choice (activated), never when the combo is refreshed
@@ -478,6 +511,7 @@ CameraPage::CameraPage(PayloadLink *link, const MavlinkDict *dict, const Payload
     cl->addWidget(group(QStringLiteral("CAPTURE (%1)").arg(QLatin1String(m_profile.name)), capture));
     cl->addWidget(group(QStringLiteral("ZOOM / FOCUS"), optics));
     cl->addWidget(group(QStringLiteral("TRACKING"), tracking));
+    cl->addWidget(group(QStringLiteral("OBJECT DETECTION"), detection));
     cl->addWidget(group(QStringLiteral("SETTINGS"), settings));
 
     m_capture = valueLabel();
@@ -579,11 +613,15 @@ void CameraPage::refresh()
     };
     QStringList parts;
     qint64 newest = -1;
+    std::optional<unsigned> viewMode;
     const auto &params = tel.payloadParams();
     for (auto it = params.cbegin(); it != params.cend(); ++it) {
         const QString name = PayloadLink::payloadParamName(it.key());
         QString v;
-        if (name == QLatin1String("VIEW_MODE")) v = option(m_profile.viewSources, it->value);
+        if (name == QLatin1String("VIEW_MODE")) {
+            viewMode = unsigned(it->value);
+            v = option(m_profile.viewSources, it->value);
+        }
         else if (name == QLatin1String("REC_SRC")) v = option(m_profile.recordSources, it->value);
         else if (name == QLatin1String("PALETTE_ID")) v = option(m_profile.irPalettes, it->value);
         else if (name == QLatin1String("EO_ZOOM") || name == QLatin1String("IR_ZOOM")) v = QStringLiteral("%1x").arg(it->value, 0, 'g', 4);
@@ -608,6 +646,36 @@ void CameraPage::refresh()
                              .arg(o.trackBox->width(), 0, 'f', 0).arg(o.trackBox->height(), 0, 'f', 0), Theme::Dim);
         if (m_trackArmed) t += QStringLiteral("<br>") + colored(QStringLiteral("Click an object on the video to track it"), Theme::Accent);
         m_track->setText(t);
+    }
+    if (m_detection) {
+        const DetectionState s = m_link->detectionStatus();
+        const DetectionFrame &d = m_link->detections();
+        const char *color = detectionLive(s) ? Theme::Ok
+                            : s == DetectionState::Off ? Theme::Dim
+                            : s == DetectionState::Waiting || s == DetectionState::Stale ? Theme::Warn : Theme::Bad;
+        QString t = colored(detectionStateText(s).toHtmlEscaped(), color);
+        if (detectionLive(s)) {
+            t += colored(QStringLiteral(" · boxes: %1 · frame %2").arg(d.boxes.size()).arg(d.frameId), Theme::Dim);
+            if (d.rejected) t += colored(QStringLiteral(" · %1 invalid").arg(d.rejected), Theme::Warn);
+            // The packet says nothing about which video layout its coordinates fit
+            if (m_profile.viewSourceId && viewMode && *viewMode != m_profile.viewSourceEo)
+                t += QStringLiteral("<br>") + colored(QStringLiteral("View is not EO only: box alignment in this view is unverified"), Theme::Warn);
+        }
+        if (m_selectedDetection) {
+            const auto sel = std::find_if(d.boxes.begin(), d.boxes.end(), [this](const DetectionBox &b) { return b.trackId == m_selectedDetection; });
+            t += QStringLiteral("<br>");
+            if (sel == d.boxes.end()) {
+                t += colored(QStringLiteral("Selected #%1: not in the last packet").arg(m_selectedDetection), Theme::Dim);
+            } else {
+                const QRectF box(sel->rect);
+                t += colored(QStringLiteral("Selected %1: centre %2, %3, size %4×%5 (not sent to the tracker)")
+                                 .arg(detectionLabel(*sel)).arg(box.center().x(), 0, 'f', 0).arg(box.center().y(), 0, 'f', 0)
+                                 .arg(box.width(), 0, 'f', 0).arg(box.height(), 0, 'f', 0), Theme::Accent);
+            }
+        } else if (s == DetectionState::Boxes) {
+            t += QStringLiteral("<br>") + colored(QStringLiteral("Click a box on the video to select it"), Theme::Dim);
+        }
+        m_detection->setText(t);
     }
 }
 

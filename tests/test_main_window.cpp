@@ -287,6 +287,105 @@ private slots:
         QVERIFY(ip->isEnabled());
     }
 
+    // Enable, boxes on the video, select one: nothing reaches the tracker. Select target ends detection; Enable disarms.
+    void detectionWorkflowNeverTriggersTracking()
+    {
+        FakePayload fake;
+        MainWindow w;
+        w.resize(1440, 900);
+        w.show();
+        w.findChild<QLineEdit *>(QStringLiteral("ipEdit"))->setText(QStringLiteral("127.0.0.1"));
+        w.findChild<QSpinBox *>(QStringLiteral("portSpin"))->setValue(fake.port);
+        w.findChild<QPushButton *>(QStringLiteral("connectButton"))->click();
+        QTRY_VERIFY_WITH_TIMEOUT(isOpen(w.link()->state()), 5000);
+        QVERIFY(fake.learnAppEndpoint());
+        auto buttonText = [&](const QString &text) {
+            for (QPushButton *b : w.findChildren<QPushButton *>()) if (b->text() == text) return b;
+            return static_cast<QPushButton *>(nullptr);
+        };
+        auto *camera = w.findChild<CameraPage *>();
+        auto *view = w.findChild<VideoView *>();
+        QVERIFY(camera && view && buttonText(QStringLiteral("Enable detection")) && buttonText(QStringLiteral("Disable detection")));
+        auto label = [&](const QString &text) {
+            for (QLabel *l : camera->findChildren<QLabel *>()) if (l->text().contains(text)) return l;
+            return static_cast<QLabel *>(nullptr);
+        };
+        QTRY_VERIFY_WITH_TIMEOUT(label(QStringLiteral("Off (support unknown")), 3000);
+
+        buttonText(QStringLiteral("Enable detection"))->click();
+        QCOMPARE(w.link()->detectionStatus(), DetectionState::Waiting);
+        QTRY_VERIFY_WITH_TIMEOUT(label(QStringLiteral("Waiting for the first packet")), 3000);
+        QTRY_VERIFY_WITH_TIMEOUT(w.link()->tracker().commands().back().action == QStringLiteral("Detection stream every 100 ms"), 3000);
+
+        view->setImage([] { QImage i(1280, 720, QImage::Format_RGB32); i.fill(Qt::black); return i; }());
+        det_packet_t p{};
+        p.magic = DET_PACKET_MAGIC;
+        p.version = DET_PACKET_VERSION;
+        p.num_boxes = 1;
+        p.frame_id = 9;
+        p.boxes[0] = {480, 270, 200, 100, 7, 3, 200};
+        uint8_t payload[MAVLINK_MSG_V2_EXTENSION_FIELD_PAYLOAD_LEN] = {0};
+        memcpy(payload, &p, sizeof p);
+        mavlink_message_t m;
+        mavlink_msg_v2_extension_pack_chan(1, MAV_COMP_ID_USER2, MAVLINK_COMM_0, &m, 0, 1, 193, DET_MSG_TYPE, payload);
+        fake.send(m);
+        QTRY_COMPARE_WITH_TIMEOUT(w.link()->detectionStatus(), DetectionState::Boxes, 3000);
+        QTRY_VERIFY_WITH_TIMEOUT(label(QStringLiteral("boxes: 1")), 3000);
+
+        const size_t before = w.link()->tracker().commands().size();
+        fake.received();
+        const QPoint centre = detectionRectInPicture(QRect(480, 270, 200, 100), view->pictureRect()).center().toPoint();
+        QTest::mouseClick(view, Qt::LeftButton, {}, centre);
+        QCOMPARE(view->selectedDetection(), quint16(7));
+        QTRY_VERIFY_WITH_TIMEOUT(label(QStringLiteral("Selected #7 class 3 78%: centre 580, 320, size 200×100")), 3000);
+        if (const QByteArray dir = qgetenv("SCREENSHOT_DIR"); !dir.isEmpty()) w.grab().save(QString::fromLocal8Bit(dir) + QStringLiteral("/operate_detection.png"));
+        QTest::qWait(300);
+        QCOMPARE(w.link()->tracker().commands().size(), before);  // selecting sends nothing
+        for (const MavFrame &f : fake.received()) {
+            const bool tracking = f.msgid == MAVLINK_MSG_ID_COMMAND_LONG && mavlink_msg_command_long_get_command(&f.msg) == MAV_CMD_USER_4;
+            QVERIFY(!tracking && f.msgid != MAVLINK_MSG_ID_GIMBAL_DEVICE_SET_ATTITUDE);
+        }
+
+        // Stale: boxes and selection leave the screen with the packets
+        QTRY_COMPARE_WITH_TIMEOUT(w.link()->detectionStatus(), DetectionState::Stale, int(kDetectionStaleMs) + 1000);
+        QCOMPARE(view->selectedDetection(), quint16(0));
+        QTRY_VERIFY_WITH_TIMEOUT(label(QStringLiteral("Stale: packets stopped")), 3000);
+
+        // Select target turns the detector off, and a click is then a tracker target again
+        buttonText(QStringLiteral("Select target"))->click();
+        QVERIFY(camera->trackArmed());
+        QCOMPARE(w.link()->detectionStatus(), DetectionState::Off);
+
+        // Enable detection disarms the tracker: a click can no longer send a target
+        buttonText(QStringLiteral("Enable detection"))->click();
+        QVERIFY(!camera->trackArmed());
+        QVERIFY(w.link()->detectionEnabled());
+
+        // Disable: stream rate 0 and TRACK_MODE back to object tracking
+        fake.received();
+        buttonText(QStringLiteral("Disable detection"))->click();
+        QCOMPARE(w.link()->detectionStatus(), DetectionState::Off);
+        bool rateZero = false, modeBack = false;
+        QElapsedTimer t;
+        t.start();
+        while (t.elapsed() < 3000 && !(rateZero && modeBack)) {
+            for (const MavFrame &f : fake.received()) {
+                rateZero |= f.msgid == MAVLINK_MSG_ID_COMMAND_LONG && mavlink_msg_command_long_get_command(&f.msg) == MAV_CMD_SET_MESSAGE_INTERVAL &&
+                            int(mavlink_msg_command_long_get_param1(&f.msg)) == MAVLINK_MSG_ID_V2_EXTENSION && mavlink_msg_command_long_get_param2(&f.msg) == 0;
+                if (f.msgid == MAVLINK_MSG_ID_PARAM_EXT_SET) {
+                    char pid[17] = {0}, v[129] = {1};
+                    mavlink_msg_param_ext_set_get_param_id(&f.msg, pid);
+                    mavlink_msg_param_ext_set_get_param_value(&f.msg, v);
+                    modeBack |= QLatin1String(pid) == QLatin1String("TRACK_MODE") && v[0] == 0;
+                }
+            }
+            QTest::qWait(10);
+        }
+        QVERIFY(rateZero && modeBack);
+        w.findChild<QPushButton *>(QStringLiteral("connectButton"))->click();
+        QTRY_COMPARE_WITH_TIMEOUT(w.link()->state(), LinkState::Disconnected, 3000);
+    }
+
     // Choosing another model rebuilds the gimbal and camera pages from its profile; a different reported model warns
     void modelSwitchRebuildsPages()
     {

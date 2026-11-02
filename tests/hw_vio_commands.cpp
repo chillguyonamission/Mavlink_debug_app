@@ -4,7 +4,7 @@
 // tracking moves the gimbal to follow a target; settings writes camera settings (only values read back from
 // the camera) and changes three of them, restoring each.
 //
-//   hw_vio_commands --ip 192.168.55.1 [--steps control-onboard,camera,angle,rate,mode-flags,tracking,settings] [--record run.jsonl]
+//   hw_vio_commands --ip 192.168.55.1 [--steps control-onboard,camera,angle,rate,mode-flags,tracking,settings,detection,detection-forward] [--record run.jsonl]
 
 #include "frame_writer.h"
 #include "payload_link.h"
@@ -345,6 +345,60 @@ int main(int argc, char *argv[])
     link.gimbalAngle(pitch0, yaw0);
     settle(QStringLiteral("angle back to start"));
     check(reachPitchYaw(pitch0, yaw0, 5000), QStringLiteral("back to start"));
+    }
+
+    // detection changes TRACK_MODE and restores it; nothing moves. detection-forward then answers what is still unknown:
+    // does a detected box work as a tracker target after switching TRACK_MODE back? The gimbal follows, then returns.
+    if (steps.contains(QLatin1String("detection")) || steps.contains(QLatin1String("detection-forward"))) {
+    if (!safe(&why)) { log(QStringLiteral("ABORT: ") + why); return 1; }
+    log(QStringLiteral("DETECTION (keep an object in view)"));
+    const PayloadProfile &vio = vioProfile();
+    link.detectionEnable(vio.trackingModeId, vio.trackingDetectionMode);
+    check(settle(QStringLiteral("TRACK_MODE = detection"))->state == TrackedCommand::Accepted, QStringLiteral("TRACK_MODE acknowledged"));
+    check(waitUntil([&] { return detectionLive(link.detectionStatus()); }, 8000),
+          QStringLiteral("packets arrive: %1").arg(detectionStateText(link.detectionStatus())));
+    std::optional<DetectionBox> target;
+    quint32 first = link.detections().frameId, last = first;
+    int rejected = 0;
+    waitUntil([&] {
+        last = link.detections().frameId;
+        rejected = std::max(rejected, link.detections().rejected);
+        for (const DetectionBox &b : link.detections().boxes) {
+            if (!target) log(QStringLiteral("  box %1 at %2,%3 %4x%5").arg(detectionLabel(b)).arg(b.rect.x()).arg(b.rect.y()).arg(b.rect.width()).arg(b.rect.height()));
+            if (b.trackId) target = b;
+        }
+        return false;
+    }, 10000);
+    log(QStringLiteral("  frame ids %1..%2 in 10 s, up to %3 invalid boxes per packet").arg(first).arg(last).arg(rejected));
+    check(rejected == 0, QStringLiteral("no invalid boxes"));
+    check(detectionLive(link.detectionStatus()), QStringLiteral("still arriving after 10 s"));
+    link.detectionStop();
+    settle(QStringLiteral("stream rate 0"));
+    pause(2500);
+    check(link.detectionStatus() == DetectionState::Off, QStringLiteral("packets stopped after rate 0"));
+    link.cameraParam(QStringLiteral("Detection off"), vio.trackingModeId, vio.trackingObjectMode);
+    check(settle(QStringLiteral("TRACK_MODE = object"))->state == TrackedCommand::Accepted, QStringLiteral("TRACK_MODE restored"));
+
+    if (steps.contains(QLatin1String("detection-forward"))) {
+        check(target.has_value(), QStringLiteral("a box with a track ID to forward"));
+        if (target) {
+            const QRectF box(target->rect);
+            link.trackingStreams();
+            link.trackingMode(PayloadLink::TrackActive);
+            settle(QStringLiteral("tracker ACTIVE"));
+            link.trackingTarget(box.center().x(), box.center().y(), box.width(), box.height());
+            settle(QStringLiteral("target from the detected box"));
+            check(waitUntil([&] { return link.operatorStatus().trackStatus.value_or(-1) == PayloadLink::TrackTracked; }, 2500), QStringLiteral("TRACKED"));
+            const QRectF got = link.operatorStatus().trackBox.value_or(QRectF());
+            log(QStringLiteral("  asked centre %1,%2 size %3x%4, reported box x %5 y %6 w %7 h %8").arg(box.center().x()).arg(box.center().y()).arg(box.width()).arg(box.height())
+                    .arg(got.x()).arg(got.y()).arg(got.width()).arg(got.height()));
+            link.trackingMode(PayloadLink::TrackStop);
+            settle(QStringLiteral("tracker STOP"));
+            link.gimbalAngle(pitch0, yaw0);
+            settle(QStringLiteral("angle back to start"));
+            check(reachPitchYaw(pitch0, yaw0, 8000), QStringLiteral("back to start"));
+        }
+    }
     }
 
     if (steps.contains(QLatin1String("settings-read"))) {  // read-only
