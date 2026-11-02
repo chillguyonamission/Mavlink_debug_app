@@ -58,6 +58,7 @@ void PayloadLink::connectTo(const QString &ip, int port)
     m_ip = ip.trimmed().toLatin1();
     m_target = QStringLiteral("%1:%2").arg(QString::fromLatin1(m_ip)).arg(port);
     m_obs = {};
+    m_dropped = 0;
     m_heartbeats.clear();
     m_openSinceMs = -1;
     m_telemetry.clear();
@@ -697,15 +698,20 @@ bool PayloadLink::requestPayloadInfo(bool automatic)
     m_sdk->getPayloadCameraSettingList();  // includes the gimbal control source the gimbal panel shows
     m_listMs = now;
 
-    // DEBUG parameter streams, with the intervals (ms) Gremsy's tests/ui_demo/main.cpp uses
-    static const std::pair<int, int> rates[] = {
+    // DEBUG parameter streams, with the intervals (ms) Gremsy's tests/ui_demo/main.cpp uses. An EO-only model gets what
+    // the SDK's payload_get_status example asks a ZIO for, less IR zoom.
+    static const std::vector<std::pair<int, int>> eoOnly = {
+        {PARAM_EO_ZOOM_LEVEL, 1000}, {PARAM_GIMBAL_MODE, 1000}, {PARAM_PAYLOAD_GPS_LON, 1000},
+        {PARAM_PAYLOAD_GPS_LAT, 1000}, {PARAM_PAYLOAD_GPS_ALT, 1000}};
+    static const std::vector<std::pair<int, int>> all = {
         {PARAM_EO_ZOOM_LEVEL, 1000}, {PARAM_IR_ZOOM_LEVEL, 1000}, {PARAM_LRF_RANGE, 100},
         {PARAM_LRF_OFSET_X, 100}, {PARAM_LRF_OFSET_Y, 100}, {PARAM_TARGET_COOR_LON, 1000},
         {PARAM_TARGET_COOR_LAT, 1000}, {PARAM_TARGET_COOR_ALT, 1000}, {PARAM_CAM_VIEW_MODE, 1000},
         {PARAM_CAM_REC_SOURCE, 1000}, {PARAM_CAM_IR_TYPE, 1000}, {PARAM_CAM_IR_PALETTE_ID, 1000},
         {PARAM_GIMBAL_MODE, 1000}, {PARAM_PAYLOAD_GPS_LON, 1000}, {PARAM_PAYLOAD_GPS_LAT, 1000},
-        {PARAM_PAYLOAD_GPS_ALT, 1000}};
-    for (const auto &r : rates) {
+        {PARAM_PAYLOAD_GPS_ALT, 1000}, {PARAM_CAM_IR_FFC_MODE, 1000}, {PARAM_IR_TEMP_MAX, 1000},
+        {PARAM_IR_TEMP_MIN, 1000}, {PARAM_IR_TEMP_MEAN, 1000}};
+    for (const auto &r : m_hasIr ? all : eoOnly) {
         m_tracker.expect(p + QStringLiteral("Stream %1 every %2 ms").arg(payloadParamName(r.first)).arg(r.second),
                          MAVLINK_MSG_ID_COMMAND_LONG, MAV_CMD_SET_MESSAGE_INTERVAL, {}, now,
                          [idx = r.first, us = r.second * 1000](const MavFrame &f) {  // the SDK sends its own stream requests too
@@ -722,7 +728,7 @@ void PayloadLink::sendStreamAndFovRequests()
 {
     m_sdk->getPayloadCameraStreamingInformation();  // stream_id 0: every stream
     m_sdk->getPayloadCameraFOVStatus(CAMERA_EO);
-    m_sdk->getPayloadCameraFOVStatus(CAMERA_IR);
+    if (m_hasIr) m_sdk->getPayloadCameraFOVStatus(CAMERA_IR);
 }
 
 bool PayloadLink::requestStreamAndFov()
@@ -731,12 +737,14 @@ bool PayloadLink::requestStreamAndFov()
     const qint64 now = nowMs();
     m_tracker.expect(QStringLiteral("Request stream information"), MAVLINK_MSG_ID_COMMAND_LONG, MAV_CMD_REQUEST_VIDEO_STREAM_INFORMATION, {}, now, {},
                      MAVLINK_MSG_ID_VIDEO_STREAM_INFORMATION);
-    for (const camera_type_t cam : {CAMERA_EO, CAMERA_IR})
+    for (const camera_type_t cam : {CAMERA_EO, CAMERA_IR}) {
+        if (cam == CAMERA_IR && !m_hasIr) continue;
         m_tracker.expect(cam == CAMERA_EO ? QStringLiteral("Request EO FOV") : QStringLiteral("Request IR FOV"), MAVLINK_MSG_ID_COMMAND_LONG,
                          MAV_CMD_REQUEST_MESSAGE, {}, now, [cam](const MavFrame &f) {
                              return int(mavlink_msg_command_long_get_param1(&f.msg)) == MAVLINK_MSG_ID_CAMERA_FOV_STATUS &&
                                     int(mavlink_msg_command_long_get_param2(&f.msg)) == int(cam);
                          }, MAVLINK_MSG_ID_CAMERA_FOV_STATUS);
+    }
     sendStreamAndFovRequests();
     emit commandsChanged();
     return true;

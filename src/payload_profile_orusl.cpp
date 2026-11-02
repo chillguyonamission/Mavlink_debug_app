@@ -82,7 +82,7 @@ const PayloadProfile &oruslProfile()
               {PAYLOAD_CAMERA_EO_APERTURE_F11, "F11"}, {PAYLOAD_CAMERA_EO_APERTURE_F14, "F14"}}},
             {"Exposure", "High sensitivity", PAYLOAD_CAMERA_EO_HS, onOff(PAYLOAD_CAMERA_EO_HS_ON, PAYLOAD_CAMERA_EO_HS_OFF)},
             // orusl_sdk.h defines both under PAYLOAD_CAMERA_VIDEO_BRIGHT_VALUE (the second wins), so the IDs are spelled
-            // out; its gain IDs are empty strings, so gain is not offered.
+            // out; its gain IDs are empty strings, so gain is not offered. C_V_MinSP has no values in the header: not offered.
             {"Exposure", "Bright (high sensitivity on)", "C_V_BrP_HS", {}, 0, 41},
             {"Exposure", "Bright (high sensitivity off)", "C_V_BrP_LS", {}, 0, 37},
 

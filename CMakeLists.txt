@@ -84,6 +84,8 @@ foreach(t link_logic payload_link inspector payload_control pcap main_window det
     set_tests_properties(${t} PROPERTIES TIMEOUT 60 ENVIRONMENT QT_QPA_PLATFORM=offscreen)
 endforeach()
 
+target_compile_definitions(test_payload_control PRIVATE SDK_PAYLOAD_DEFINE_DIR="${SDK_DIR}/libs/payload-define")
+
 # --- Headless capture tool (hardware checks, field recordings) ---
 add_executable(mavlink_capture tools/mavlink_capture.cpp)
 target_link_libraries(mavlink_capture PRIVATE appcore)

@@ -6,7 +6,8 @@ static_assert(ZOOM_EO_12X == 11 && ZOOM_IR_8X == 7 && ISOTHERM_COLOR_RED == 6, "
 
 // Not offered: C_G_AE_MODE / C_G_SHUTTER / C_G_IRIS / C_G_GAIN, C_V_ZOOM_SPEED / C_V_FOCUS_SPEED and LRF_MODE (no values
 // in mb1_sdk.h), C_G_AE_COMP and the isotherm region temperatures (signed; settings are sent as uint32), and
-// SETTING_TARGET (only selects which device a UI shows).
+// SETTING_TARGET ("which device to configure", ui_demo offers it; what it changes for other settings is undocumented,
+// so it needs a real MB1 before it is offered).
 const PayloadProfile &mb1Profile()
 {
     static const std::vector<ParamOption> viewSources{
@@ -180,11 +181,17 @@ const PayloadProfile &mb1Profile()
               {PAYLOAD_CAMERA_VIDEO_OSD_MODE_STATUS, "Status"}}},
             {"Video / OSD / AI", "Storage", PAYLOAD_CAMERA_STORAGE,
              {{PAYLOAD_CAMERA_STORAGE_INTERNAL, "Internal"}, {PAYLOAD_CAMERA_STORAGE_SDCARD, "SD card"}}},
+            // The header: "used in some payloads". The SDK's capture example sets STORAGE, its ui_demo this one. Each
+            // stays disabled here until the camera reports it.
+            {"Video / OSD / AI", "Storage type", PAYLOAD_CAMERA_STORAGE_TYPE,
+             {{PAYLOAD_CAMERA_STORAGE_TYPE_INTERNAL, "Internal"}, {PAYLOAD_CAMERA_STORAGE_TYPE_SDCARD, "SD card"}}},
             {"Video / OSD / AI", "Object detection", PAYLOAD_CAMERA_OBJECT_DETECTION, enable},
         },
         PAYLOAD_CAMERA_GIMBAL_FW_FLAG,
         {{PAYLOAD_CAMERA_GIMBAL_FW_FLAG_OVERWRITE, "Overwrite"}, {PAYLOAD_CAMERA_GIMBAL_FW_FLAG_FORWARD, "Forward"}},
         PAYLOAD_CAMERA_GIMBAL_FW_FLAG_FORWARD,  // forward this app's gimbal commands to the gimbal
+        false,
+        {"Lynx", "GHadron", "GHardron"},
     };
     return p;
 }

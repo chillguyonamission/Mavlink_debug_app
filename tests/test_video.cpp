@@ -5,6 +5,7 @@
 #include "video_page.h"
 #include "video_player.h"
 
+#include <QDir>
 #include <QLineEdit>
 #include <QPushButton>
 #include <QtTest>
@@ -67,6 +68,31 @@ private slots:
 
         QVERIFY(p.start(m_url, VideoPlayer::Transport::Udp, 50));  // UDP works on loopback
         QTRY_VERIFY_WITH_TIMEOUT(p.frames() >= 5, 10000);
+    }
+
+    // Starting and stopping again and again must not pile up pipelines, their threads or their sockets.
+    void restartingLeavesNothingBehind()
+    {
+        VideoPlayer p;
+        const auto cycle = [&] {
+            QVERIFY(p.start(m_url, VideoPlayer::Transport::Tcp, 50));
+            QTRY_COMPARE_WITH_TIMEOUT(p.state(), VideoPlayer::State::Playing, 10000);
+            p.stop();
+        };
+        const auto threads = [] { return QDir(QStringLiteral("/proc/self/task")).entryList(QDir::Dirs | QDir::NoDotAndDotDot).size(); };
+        // Not GPU buffers: GStreamer 1.24.2's vah264dec keeps one dmabuf per pipeline, with no app code involved (docs/TESTING.md)
+        const auto files = [] {
+            int n = 0;
+            for (const QFileInfo &f : QDir(QStringLiteral("/proc/self/fd")).entryInfoList(QDir::Files | QDir::System | QDir::NoDotAndDotDot))
+                n += !f.symLinkTarget().contains(QStringLiteral("dmabuf"));
+            return n;
+        };
+        for (int i = 0; i < 3; ++i) cycle();  // GStreamer's task pool and the local server settle first
+        QTest::qWait(500);
+        const auto threadsBefore = threads();
+        const int filesBefore = files();
+        for (int i = 0; i < 8; ++i) cycle();
+        QTRY_VERIFY_WITH_TIMEOUT(threads() <= threadsBefore && files() <= filesBefore, 5000);
     }
 
     void reportsErrors()

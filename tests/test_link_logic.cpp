@@ -71,7 +71,7 @@ private slots:
         hb[1 << 8 | 154] = t - to - 1;  // aged out
         hb[2 << 8 | 100] = t;           // another sysid still counts
         hb[1 << 8 | 1] = t;             // not an expected component
-        const QList<quint8> expected{26, 100, 154};
+        const QList<QList<quint8>> expected{{26}, {100, 101}, {154, 171}};
         QCOMPARE(freshComponents(hb, expected, t, to), 2);
         QCOMPARE(payloadLamp(true, 2, 3), Lamp::Warn);
         hb[1 << 8 | 154] = t;
@@ -79,6 +79,11 @@ private slots:
         QCOMPARE(payloadLamp(true, 3, 3), Lamp::Ok);
         QCOMPARE(payloadLamp(true, 0, 3), Lamp::Bad);
         QCOMPARE(payloadLamp(false, 3, 3), Lamp::Off);
+        // Another ID of the same part counts once, not as a second part
+        hb[1 << 8 | 171] = t;
+        QCOMPARE(freshComponents(hb, expected, t, to), 3);
+        hb.remove(1 << 8 | 154);
+        QCOMPARE(freshComponents(hb, expected, t, to), 3);
     }
 
     void trafficStats()

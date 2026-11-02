@@ -49,12 +49,12 @@ Lamp linkLamp(LinkState s)
     return Lamp::Off;
 }
 
-int freshComponents(const QMap<quint16, qint64> &heartbeats, const QList<quint8> &compids, qint64 nowMs, qint64 timeoutMs)
+int freshComponents(const QMap<quint16, qint64> &heartbeats, const QList<QList<quint8>> &groups, qint64 nowMs, qint64 timeoutMs)
 {
     int n = 0;
-    for (quint8 comp : compids) {
+    for (const QList<quint8> &group : groups) {
         for (auto it = heartbeats.cbegin(); it != heartbeats.cend(); ++it) {
-            if ((it.key() & 0xFF) == comp && nowMs - it.value() <= timeoutMs) {
+            if (group.contains(quint8(it.key() & 0xFF)) && nowMs - it.value() <= timeoutMs) {
                 ++n;
                 break;
             }

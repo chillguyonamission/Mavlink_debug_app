@@ -3,6 +3,7 @@
 // The SDK's model headers reuse macro names with different values, so each profile lives in its
 // own translation unit (payload_profile_<model>.cpp) that includes only its header.
 
+#include <QRegularExpression>
 #include <QString>
 
 #include <initializer_list>
@@ -43,6 +44,9 @@ struct PayloadProfile {
     const char *gimbalControlId = nullptr;
     std::vector<ParamOption> gimbalControls;
     unsigned gimbalControlOnboard = 0;
+    bool eoFocus = true;  // the SDK's ui_demo has no focus controls for MB1, and builds no focus example for it
+    // Products on this SDK target with another name, which the payload may report (the SDK README: MB1 is Lynx, GHardron)
+    std::vector<const char *> otherNames = {};
 };
 
 // One per model, each in its own payload_profile_<model>.cpp with only that model's SDK header
@@ -62,6 +66,17 @@ inline const PayloadProfile &profileByName(const QString &name)  // VIO when unk
     for (const PayloadProfile *p : payloadProfiles())
         if (name.compare(QLatin1String(p->name), Qt::CaseInsensitive) == 0) return *p;
     return vioProfile();
+}
+
+// Does the model name a payload reports fit this profile? Ignores case and punctuation: "Vio", "ORUS-L", "G-Hadron".
+inline bool profileMatchesReport(const PayloadProfile &p, const QString &reported)
+{
+    const auto letters = [](QString s) { return s.remove(QRegularExpression(QStringLiteral("[^A-Za-z0-9]"))).toUpper(); };
+    const QString r = letters(reported);
+    if (r.contains(letters(QLatin1String(p.name)))) return true;
+    for (const char *n : p.otherNames)
+        if (r.contains(letters(QLatin1String(n)))) return true;
+    return false;
 }
 
 // Options numbered 0, 1, 2 ... in order, for the SDK headers' sequential enums

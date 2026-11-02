@@ -38,7 +38,8 @@ Lamp linkLamp(LinkState s);
 
 // How many of compids (any sysid) sent a HEARTBEAT within the timeout. heartbeats: last HEARTBEAT (ms)
 // per (sysid << 8 | compid), as PayloadLink::heartbeatSources() keeps them.
-int freshComponents(const QMap<quint16, qint64> &heartbeats, const QList<quint8> &compids, qint64 nowMs, qint64 timeoutMs);
+// How many of the groups have a component with a fresh heartbeat. A group is the IDs one part of the payload may use.
+int freshComponents(const QMap<quint16, qint64> &heartbeats, const QList<QList<quint8>> &groups, qint64 nowMs, qint64 timeoutMs);
 Lamp payloadLamp(bool linkOpen, int fresh, int expected);
 
 // Empty when valid, otherwise a user-facing reason. The SDK only supports IPv4 (inet_addr).

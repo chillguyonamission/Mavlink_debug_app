@@ -1,6 +1,7 @@
 // PayloadLink against a loopback fake payload: real SDK, real sockets, no hardware.
 #include "payload_link.h"
 
+#include <QDir>
 #include <QElapsedTimer>
 #include <QtTest>
 
@@ -29,7 +30,7 @@ private slots:
         std::vector<CapturedFrame> seen;
         bool allOnGuiThread = true;
         connect(&link, &PayloadLink::framesCaptured, this, [&](const std::vector<CapturedFrame> &f) {
-            allOnGuiThread &= QThread::currentThread() == qApp->thread();
+            allOnGuiThread &= QThread::currentThread() == QCoreApplication::instance()->thread();
             seen.insert(seen.end(), f.begin(), f.end());
         });
 
@@ -83,6 +84,26 @@ private slots:
         link.connectTo(QStringLiteral("127.0.0.1"), fake.port);
         QTRY_STATE(link, LinkState::SocketOpen, 5000);
         QVERIFY(link.heartbeatSources().isEmpty());  // nothing carried over from the previous session
+    }
+
+    // Reconnecting must not pile up what the SDK opens: its threads and its socket.
+    void reconnectingLeavesNothingBehind()
+    {
+        FakePayload fake;
+        PayloadLink link;
+        const auto cycle = [&] {
+            link.connectTo(QStringLiteral("127.0.0.1"), fake.port);
+            QTRY_STATE(link, LinkState::SocketOpen, 5000);
+            link.disconnectLink();
+            QTRY_STATE(link, LinkState::Disconnected, 3000);
+        };
+        const auto threads = [] { return QDir(QStringLiteral("/proc/self/task")).entryList(QDir::Dirs | QDir::NoDotAndDotDot).size(); };
+        const auto files = [] { return QDir(QStringLiteral("/proc/self/fd")).entryList(QDir::Files | QDir::System | QDir::NoDotAndDotDot).size(); };
+        cycle();  // anything created once and kept is not a leak
+        const auto threadsBefore = threads(), filesBefore = files();
+        for (int i = 0; i < 6; ++i) cycle();
+        QTRY_COMPARE_WITH_TIMEOUT(threads(), threadsBefore, 3000);
+        QCOMPARE(files(), filesBefore);
     }
 
     void destroyWhileOpen()

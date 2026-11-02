@@ -688,7 +688,8 @@ private slots:
             dialog->close();
             // Controls follow the profile, and a disabled one says why
             const PayloadProfile &p = profileByName(model->currentText());
-            for (const auto &[text, supported] : {std::pair{"FFC auto", p.irFfc}, {"FFC manual", p.irFfc}, {"Trigger FFC", p.irFfc}, {"WB one push", p.wbOnePush}}) {
+            for (const auto &[text, supported] : {std::pair{"FFC auto", p.irFfc}, {"FFC manual", p.irFfc}, {"Trigger FFC", p.irFfc}, {"WB one push", p.wbOnePush},
+                                                 {"Focus near", p.eoFocus}, {"Focus far", p.eoFocus}, {"Auto focus", p.eoFocus}}) {
                 QPushButton *b = nullptr;
                 for (QPushButton *x : camera->findChildren<QPushButton *>()) if (x->text() == QLatin1String(text)) b = x;
                 QVERIFY2(b, text);
@@ -704,12 +705,21 @@ private slots:
             noPalette |= c->currentText() == QStringLiteral("not supported by ZIO");
         QVERIFY(noPalette);
         QVERIFY(w.findChild<QLabel *>(QStringLiteral("appSubtitle"))->text().contains(QStringLiteral("ZIO")));
-        mavlink_message_t m;
-        mavlink_msg_component_information_basic_pack_chan(1, MAV_COMP_ID_USER2, MAVLINK_COMM_0, &m, 0, 0, 0, "Gremsy JSC", "Vio",
-                                                          "3.1.8.21", "V42A", "1");
-        fake.send(m);
+        const auto reportModel = [&](const char *name) {
+            mavlink_message_t m;
+            char vendor[32] = "Gremsy JSC", reported[32] = {0}, sw[24] = "3.1.8.21", hw[24] = "V42A", serial[32] = "1";  // pack copies the full array length
+            strncpy(reported, name, sizeof reported - 1);
+            mavlink_msg_component_information_basic_pack_chan(1, MAV_COMP_ID_USER2, MAVLINK_COMM_0, &m, 0, 0, 0, vendor, reported, sw, hw, serial);
+            fake.send(m);
+        };
+        reportModel("Vio");
         QTRY_VERIFY_WITH_TIMEOUT(w.findChild<QLabel *>(QStringLiteral("warning"))->text().contains(QStringLiteral("PAYLOAD REPORTS VIO, MODEL SET TO ZIO")), 3000);
         model->setCurrentText(QStringLiteral("VIO"));
+        emit model->activated(model->currentIndex());
+        QTRY_VERIFY_WITH_TIMEOUT(!w.findChild<QLabel *>(QStringLiteral("warning"))->text().contains(QStringLiteral("MODEL SET TO")), 3000);
+        reportModel("Lynx");  // an MB1 product: right on MB1, wrong on VIO
+        QTRY_VERIFY_WITH_TIMEOUT(w.findChild<QLabel *>(QStringLiteral("warning"))->text().contains(QStringLiteral("PAYLOAD REPORTS LYNX, MODEL SET TO VIO")), 3000);
+        model->setCurrentText(QStringLiteral("MB1"));
         emit model->activated(model->currentIndex());
         QTRY_VERIFY_WITH_TIMEOUT(!w.findChild<QLabel *>(QStringLiteral("warning"))->text().contains(QStringLiteral("MODEL SET TO")), 3000);
         w.findChild<QPushButton *>(QStringLiteral("connectButton"))->click();

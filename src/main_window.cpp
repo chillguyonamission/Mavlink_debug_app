@@ -31,8 +31,12 @@
 
 static const char *kDefaultIp = "192.168.55.1";  // PayloadSDK v3 README default
 static const int kDefaultPort = 14566;
-// Components a VIO reports from (README "Hardware checks"): payload core, camera, gimbal
-static const QList<quint8> kPayloadComponents{TelemetryStore::kPayloadCore, MAV_COMP_ID_CAMERA, MAV_COMP_ID_GIMBAL};
+// Payload core, camera, gimbal. A VIO uses 26, 100 and 154 (README "Hardware checks"); the SDK follows a camera or gimbal
+// on any of these IDs, so another model may too.
+static const QList<QList<quint8>> kPayloadComponents{
+    {TelemetryStore::kPayloadCore},
+    {MAV_COMP_ID_CAMERA, MAV_COMP_ID_CAMERA2, MAV_COMP_ID_CAMERA3, MAV_COMP_ID_CAMERA4, MAV_COMP_ID_CAMERA5, MAV_COMP_ID_CAMERA6},
+    {MAV_COMP_ID_GIMBAL, MAV_COMP_ID_GIMBAL2, MAV_COMP_ID_GIMBAL3, MAV_COMP_ID_GIMBAL4, MAV_COMP_ID_GIMBAL5, MAV_COMP_ID_GIMBAL6}};
 
 static const char *lampColor(Lamp l)
 {
@@ -152,10 +156,15 @@ MainWindow::MainWindow(QWidget *parent)
 
     m_modelBox = new QComboBox;
     m_modelBox->setObjectName(QStringLiteral("modelBox"));
-    for (const PayloadProfile *p : payloadProfiles()) m_modelBox->addItem(QLatin1String(p->name));
+    for (const PayloadProfile *p : payloadProfiles()) {
+        m_modelBox->addItem(QLatin1String(p->name));
+        QStringList products;
+        for (const char *n : p->otherNames) products << QLatin1String(n);
+        if (!products.isEmpty()) m_modelBox->setItemData(m_modelBox->count() - 1, QStringLiteral("Use for: %1").arg(products.join(QStringLiteral(", "))), Qt::ToolTipRole);
+    }
     m_modelBox->setCurrentText(profileByName(s.value(QStringLiteral("conn/model")).toString()).name);
     m_modelBox->setToolTip(QStringLiteral("Payload model: chooses the controls and the parameter values (from the SDK's "
-                                          "<model>_sdk.h). Only VIO was checked on hardware."));
+                                          "<model>_sdk.h). Lynx and GHadron use MB1. Only VIO was checked on hardware."));
 
     m_profileBox = new QComboBox;
     m_profileBox->setObjectName(QStringLiteral("profileBox"));
@@ -487,6 +496,7 @@ void MainWindow::deleteProfile()
 void MainWindow::setModel(const PayloadProfile &p)
 {
     m_profile = &p;
+    m_link->setIrCamera(p.irPaletteId != nullptr);
     const MavlinkDict *dict = m_dict.isLoaded() ? &m_dict : nullptr;
     m_video->view()->setPickMode(false);
     m_video->view()->selectDetection(0);
@@ -612,8 +622,8 @@ void MainWindow::refreshOperator()
     const int fresh = freshComponents(m_link->heartbeatSources(), kPayloadComponents, nowMs, m_link->timeoutMs());
     m_payloadLamp->setText(lampText(QStringLiteral("PAYLOAD"), payloadLamp(isOpen(st), fresh, kPayloadComponents.size()),
                                     isOpen(st) ? QStringLiteral("%1/%2").arg(fresh).arg(kPayloadComponents.size()) : QStringLiteral("—")));
-    m_payloadLamp->setToolTip(QStringLiteral("Payload core (compid 26), camera (100) and gimbal (154) with a HEARTBEAT "
-                                             "within the timeout"));
+    m_payloadLamp->setToolTip(QStringLiteral("Payload core (compid 26), a camera (100-105) and a gimbal (154, 171-175) with a "
+                                             "HEARTBEAT within the timeout"));
     m_linkLamp->setText(lampText(QStringLiteral("MAVLINK"), linkLamp(st), linkShort(st)));
     m_linkLamp->setToolTip(linkStateText(st));
 
@@ -638,7 +648,7 @@ void MainWindow::refreshOperator()
     if (m_stats.badCrc) warn << QStringLiteral("BAD CRC %1").arg(m_stats.badCrc);
     if (const CapturedFrame *c = m_link->telemetry().latest(MAVLINK_MSG_ID_COMPONENT_INFORMATION_BASIC)) {
         const QString reported = fieldText(c->frame, "model_name");
-        if (!reported.isEmpty() && reported.compare(QLatin1String(m_profile->name), Qt::CaseInsensitive) != 0)
+        if (!reported.isEmpty() && !profileMatchesReport(*m_profile, reported))
             warn << QStringLiteral("PAYLOAD REPORTS %1, MODEL SET TO %2").arg(reported.toUpper(), QString::fromLatin1(m_profile->name).toUpper());
     }
     m_warning->setText(warn.isEmpty() ? QString() : QStringLiteral("⚠ ") + warn.join(QStringLiteral("  ·  ")));

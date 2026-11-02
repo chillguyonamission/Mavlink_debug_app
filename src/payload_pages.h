@@ -35,7 +35,7 @@ public:
 
 protected:
     void report(bool ok);          // shows PayloadLink::commandError() when a command was refused
-    virtual void refresh() = 0;    // 4 Hz
+    virtual void refresh() = 0;    // 4 Hz, while visible
     virtual void linkChanged() {}  // after controls are enabled/disabled
     QWidget *controls() const { return m_controls; }
     void setPage(QWidget *controls, QWidget *status, bool statusFills = false);  // stacked vertically

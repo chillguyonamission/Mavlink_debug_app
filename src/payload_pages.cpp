@@ -37,7 +37,7 @@ PayloadPage::PayloadPage(PayloadLink *link, const MavlinkDict *dict, QWidget *pa
 {
     m_error->setWordWrap(true);
     auto *t = new QTimer(this);
-    connect(t, &QTimer::timeout, this, [this] { refresh(); });
+    connect(t, &QTimer::timeout, this, [this] { if (isVisible()) refresh(); });  // hidden: nothing to draw, nothing to ask for
     t->start(250);
     connect(link, &PayloadLink::stateChanged, this, [this] {
         if (m_controls) m_controls->setEnabled(isOpen(m_link->state()));
@@ -401,10 +401,18 @@ CameraPage::CameraPage(PayloadLink *link, const MavlinkDict *dict, const Payload
     });
     optics->addWidget(m_zoomRange, 1, 0, 1, 2);
     optics->addWidget(zoomTo, 1, 2);
-    optics->addWidget(holdButton(QStringLiteral("Focus near"), QStringLiteral("FOCUS_TYPE_CONTINUOUS -1 while held (the SDK's enum calls -1 FOCUS_OUT)"), false, -1), 2, 0);
-    optics->addWidget(holdButton(QStringLiteral("Focus far"), QStringLiteral("FOCUS_TYPE_CONTINUOUS +1 while held (the SDK's enum calls +1 FOCUS_IN)"), false, 1), 2, 1);
+    QPushButton *focusNear = holdButton(QStringLiteral("Focus near"), QStringLiteral("FOCUS_TYPE_CONTINUOUS -1 while held (the SDK's enum calls -1 FOCUS_OUT)"), false, -1);
+    QPushButton *focusFar = holdButton(QStringLiteral("Focus far"), QStringLiteral("FOCUS_TYPE_CONTINUOUS +1 while held (the SDK's enum calls +1 FOCUS_IN)"), false, 1);
     QPushButton *af = button(QStringLiteral("Auto focus"), QStringLiteral("FOCUS_TYPE_AUTO"));
     connect(af, &QPushButton::clicked, this, [this] { report(m_link->cameraFocus(FOCUS_TYPE_AUTO, 0, QStringLiteral("Auto focus"))); });
+    if (!m_profile.eoFocus) {
+        for (QPushButton *b : {focusNear, focusFar, af}) {
+            b->setEnabled(false);
+            b->setToolTip(QStringLiteral("Not supported by %1: the SDK has no focus controls for it").arg(QLatin1String(m_profile.name)));
+        }
+    }
+    optics->addWidget(focusNear, 2, 0);
+    optics->addWidget(focusFar, 2, 1);
     optics->addWidget(af, 2, 2);
     for (int c = 0; c < 3; ++c) optics->setColumnStretch(c, 1);
 
@@ -809,7 +817,6 @@ void CameraSettingsPage::showEvent(QShowEvent *e)
 
 void CameraSettingsPage::refresh()
 {
-    if (!isVisible()) return;
     const auto &params = m_link->telemetry().cameraParams();
     const qint64 n = now();
     const int once = std::numeric_limits<int>::max();  // read on request: show the age, never "stale"
@@ -922,7 +929,7 @@ void TelemetryPage::refresh()
     const qint64 n = now();
     const int once = std::numeric_limits<int>::max();  // one-off replies: show their age, never "stale"
 
-    if (isVisible()) m_link->pollStreamAndFov();
+    m_link->pollStreamAndFov();
     const int freshMs = std::max(to, 3000);  // the replies come at most every 2 s: a short link timeout must not blank them
     const auto enumName = [this](const char *e, double v) {
         const QString l = m_dict ? m_dict->enumLabel(QLatin1String(e), qint64(v)) : QString();

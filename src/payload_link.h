@@ -55,6 +55,7 @@ public:
     qint64 openSinceMs() const { return m_openSinceMs; }  // monotonic ms, -1 when not open
     void setTimeoutMs(int ms) { m_timeoutMs = ms; }
     void setDictionary(const MavlinkDict *d) { m_dict = d; }  // for the decoded summaries
+    void setIrCamera(bool has) { m_hasIr = has; }  // false: an EO-only model is not asked for IR, rangefinder or view streams
     int timeoutMs() const { return m_timeoutMs; }
     quint64 droppedDatagrams() const { return m_dropped; }  // capture queue overflow, never silent
 
@@ -184,6 +185,7 @@ private:
 
     // GUI thread only
     const MavlinkDict *m_dict = nullptr;
+    bool m_hasIr = true;
     PayloadSdkInterface *m_sdk = nullptr;
     QThread *m_worker = nullptr;
     QByteArray m_ip;  // the SDK keeps a raw char* to it for the whole connection

@@ -277,6 +277,54 @@ private slots:
         QCOMPARE(&profileByName(QStringLiteral("unknown")), &vioProfile());
         QCOMPARE(zioProfile().irPaletteId, nullptr);  // EO only
         QCOMPARE(QString::fromLatin1(mb1Profile().gimbalControlId), QStringLiteral("GB_FW_FLAG"));
+        QVERIFY(vioProfile().eoFocus && zioProfile().eoFocus && oruslProfile().eoFocus && !mb1Profile().eoFocus);
+    }
+
+    // The SDK selects a model at build time with one header per model: each must have a profile here, so a new SDK
+    // version with a new model fails this instead of going unnoticed.
+    void everySdkModelHeaderHasAProfile()
+    {
+        const QStringList headers = QDir(QStringLiteral(SDK_PAYLOAD_DEFINE_DIR)).entryList({QStringLiteral("*_sdk.h")}, QDir::Files);
+        QCOMPARE(headers.size(), int(payloadProfiles().size()));
+        for (const QString &h : headers) {
+            const QString model = h.section(QLatin1Char('_'), 0, 0);
+            QVERIFY2(profileByName(model).name == model.toUpper() || QString::fromLatin1(profileByName(model).name).compare(model, Qt::CaseInsensitive) == 0, qPrintable(h));
+        }
+    }
+
+    void reportedModelNames()
+    {
+        for (const char *n : {"Vio", "VIO", "Gremsy VIO"}) QVERIFY2(profileMatchesReport(vioProfile(), QLatin1String(n)), n);
+        for (const char *n : {"MB1", "Lynx", "LYNX", "GHadron", "G-Hadron", "GHardron"}) QVERIFY2(profileMatchesReport(mb1Profile(), QLatin1String(n)), n);
+        for (const char *n : {"OrusL", "ORUS-L", "Orus L"}) QVERIFY2(profileMatchesReport(oruslProfile(), QLatin1String(n)), n);
+        QVERIFY(!profileMatchesReport(zioProfile(), QStringLiteral("Vio")));
+        QVERIFY(!profileMatchesReport(vioProfile(), QStringLiteral("Lynx")));
+        QVERIFY(!profileMatchesReport(oruslProfile(), QStringLiteral("Orus")));  // the SDK has no plain Orus target
+    }
+
+    // An EO-only model is never asked for IR: not the FOV, not the IR, rangefinder or view streams.
+    void eoOnlyModelGetsNoIrRequests()
+    {
+        QSet<QString> ir, eo;
+        for (const bool hasIr : {true, false}) {
+            FakePayload fake;
+            PayloadLink link;
+            link.setIrCamera(hasIr);
+            link.connectTo(QStringLiteral("127.0.0.1"), fake.port);
+            QTRY_VERIFY_WITH_TIMEOUT(isOpen(link.state()), 5000);
+            QVERIFY(link.requestPayloadInfo());
+            QVERIFY(link.requestStreamAndFov());
+            for (const TrackedCommand &t : link.tracker().commands()) (hasIr ? ir : eo).insert(t.action);
+        }
+        QVERIFY(ir.contains(QStringLiteral("Request IR FOV")));
+        QVERIFY(ir.contains(QStringLiteral("Stream IR_TEMP_MAX every 1000 ms")));
+        QVERIFY(ir.contains(QStringLiteral("Stream LRF_RANGE every 100 ms")));
+        QVERIFY(eo.contains(QStringLiteral("Request EO FOV")));
+        QVERIFY(eo.contains(QStringLiteral("Stream EO_ZOOM every 1000 ms")));
+        QVERIFY(eo.contains(QStringLiteral("Stream GB_MODE every 1000 ms")));
+        for (const QString &a : eo) {
+            QVERIFY2(!a.contains(QStringLiteral("IR")) && !a.contains(QStringLiteral("LRF")) && !a.contains(QStringLiteral("VIEW")) && !a.contains(QStringLiteral("REC_SRC")) && !a.contains(QStringLiteral("PALETTE")), qPrintable(a));
+        }
     }
 
     void vioProfileComesFromSdkHeader()
