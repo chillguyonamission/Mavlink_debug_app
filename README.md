@@ -7,13 +7,47 @@ PayloadSDK and inspecting the real MAVLink traffic of that connection.
 
 - connection management with saved profiles
 - the MAVLink Inspector, with network capture
-- VIO gimbal and camera controls
+- gimbal and camera controls for each supported payload model
 - telemetry
 - command/acknowledgement tracking
 - live RTSP video
+- onboard object detection boxes on the video (not yet run on hardware)
 
-It was checked against a real VIO (see *Hardware checks*). Payload models other than the VIO are
-not supported yet. See *Acceptance checklist* and *Known limitations*.
+It was checked against a real VIO (see *Hardware checks*). The other models are built from the SDK's
+headers and have not been run on hardware. See *Acceptance checklist* and *Known limitations*.
+
+**Contents:** [Quick start](#quick-start-ubuntu-2404-or-wsl2) · [Supported payloads](#supported-payloads) ·
+[Build, test, install](#build-test-install) · [Run](#run) · [MAVLink Inspector](#mavlink-inspector) ·
+[Payload control](#payload-control) · [Hardware checks](#hardware-checks) · [Live video](#live-video) ·
+[Known limitations](#known-limitations)
+
+## Supported payloads
+
+PayloadSDK ships one parameter header per model (`libs/payload-define/<model>_sdk.h`). Every model it
+defines has a profile here: VIO, ZIO, MB1 and OrusL. "Orus" means the OrusL profile; the SDK has no other
+Orus header. Choose the model with **Model** in the SETTINGS drawer. The choice is saved with each
+connection profile, and changing it rebuilds the gimbal and camera panels. A header warning appears when
+the payload reports a different model name.
+
+The connection is the same for every model: MAVLink over UDP to the payload's IP and port (default
+`192.168.55.1:14566`), with video at `rtsp://<IP>:8554/payload`. The controls that use only standard
+MAVLink are common to all models: gimbal modes, rate and move to angle, zoom and focus, photo and
+recording. What changes per model is listed below, using only that model's header:
+
+| | VIO | ZIO | MB1 | OrusL |
+|---|---|---|---|---|
+| Hardware-tested | ✅ (software 3.1.4.18 and 3.1.8.21) | — | — | — |
+| View source | EO, IR, EO/IR, IR/EO, Sync, Side by side | EO only | EO, IR, EO/IR, IR/EO | EO, IR, EO/IR, IR/EO, Sync, Side by side |
+| Record source | ✅ | not supported | ✅ | ✅ |
+| IR palette | ✅ | not supported (EO only) | ✅ | ✅ |
+| Object tracking | ✅ (verified) | ✅ | ✅ | ✅ |
+| Gimbal control source | `GB_FW_FLAG` Autopilot / Onboard computer / SBUS Convert | none named | `GB_FW_FLAG` Overwrite / Forward | none named |
+| Camera settings dialog | 30: exposure, image, focus/zoom, thermal, video/OSD/LRF | 25: exposure, image, focus/zoom, video/OSD | 59: exposure, image, focus/zoom, thermal, isotherm regions, video/OSD/AI | 38: exposure, image, focus/zoom, thermal, video/OSD/LRF |
+
+A control the model does not support is shown disabled as "not supported by <model>". Tracking is replaced
+by a note, and the control-source switch is hidden. Settings whose header gives no values, or only signed
+values, are left out. Examples are OrusL gain, the MB1 `C_G_*` aliases, zoom/focus speed, LRF, AE
+compensation and isotherm temperatures. Each `src/payload_profile_<model>.cpp` lists them in a comment.
 
 ## Quick start (Ubuntu 24.04 or WSL2)
 
@@ -46,6 +80,7 @@ scripts/build.sh --run        # checks dependencies, builds, runs the tests, sta
 | `src/frame_text.*` | Summary, validation text, hex dump, and CSV/JSON encoding (one source for the table, the details pane, and the files) |
 | `src/frame_filter.*`, `src/flow_stats.*`, `src/frame_writer.*` | Inspector filters, per-flow statistics, and the background file writer |
 | `src/command_tracker.*` | Matches each UI action to its outgoing frame and to the payload's ACK |
+| `src/detection.*` | Object detection packets: validation, states, mapping onto the picture |
 | `src/telemetry.*` | Latest validated RX frames, the payload's DEBUG parameter stream, and gimbal flag rules |
 | `src/payload_profile*` | Per-model parameter IDs and values, taken from the SDK's `payload-define/<model>_sdk.h` |
 | `src/video_player.*`, `src/video_page.*` | RTSP video (GStreamer `appsink`) and the Video tab |
@@ -57,6 +92,9 @@ scripts/build.sh --run        # checks dependencies, builds, runs the tests, sta
 | `tools/check_tlog.py` | Reads a `.tlog` file with pymavlink, an independent check of recorded files |
 | `tools/mavlink_capture.cpp` | Headless capture and report (`build/mavlink_capture`), for hardware checks |
 | `docs/INSTALL_UBUNTU.md` | Step-by-step install and hardware-test guide for native Ubuntu |
+| `docs/SDK_FEATURE_MATRIX.md` | Every PayloadSDK API: implemented, partial, unused, needs verification, or unsupported |
+| `docs/API_INTEGRATION.md` | Exact calls, parameters and response semantics for the newer features, and what is not built and why |
+| `docs/ARCHITECTURE.md`, `docs/TESTING.md`, `docs/DEVELOPMENT_PROGRESS.md`, `CHANGELOG.md` | Data paths and threads; tests and troubleshooting; software and hardware status; changes |
 | `docs/screenshots/` | GUI screenshots shown in this README (regenerated by the GUI test) |
 | `scripts/build.sh` | Dependency check, build, tests, optional run |
 | `tests/hw_vio_commands.cpp` | Hardware check of the control path on a real VIO; moves the gimbal; never run by ctest |
@@ -157,8 +195,8 @@ On a real payload, use the `hardwareScreenshots` run under *Hardware checks*.
 ![Analyze: telemetry](docs/screenshots/analyze_telemetry.png)
 ![Analyze: statistics](docs/screenshots/analyze_statistics.png)
 
-- **Profiles:** **Save…** stores the current IP, port, and timeout under a name. Choosing a profile
-  fills those fields.
+- **Profiles:** **Save…** stores the current IP, port, timeout and payload model under a name. Choosing
+  a profile fills those fields.
 - **Persistence:** profiles, the last values, inspector filters, and video settings are restored on
   start-up. Each stored value is validated again before use, and invalid entries are dropped.
 
@@ -241,16 +279,20 @@ payload ↔ autopilot.
 | `.csv` | One row per frame: index, datagram, UTC time, monotonic ns, direction, peer, header fields, target, status, signed flag, send errno, decoded summary, raw hex. |
 | `.jsonl` | One JSON object per frame, with the same metadata plus typed `fields` (NaN and Inf are written as the strings `"nan"`, `"inf"`, `"-inf"`). |
 
-## Payload control (VIO)
+## Payload control
 
-Every command goes through the PayloadSDK API. Displayed "measured" values come only from received
+The controls below are described as verified on a VIO. On other models, the panels offer only what that
+model's profile supports (see *Supported payloads*). Every command goes through the PayloadSDK API. Displayed "measured" values come only from received
 frames that passed CRC validation, never from what was sent.
 
 | Where | Controls | Feedback |
 |---|---|---|
 | Operate, left column | Modes OFF (with confirmation), LOCK, FOLLOW, MAPPING, RESET via the `GIMBAL_DEVICE_SET_ATTITUDE` flags; the payload's gimbal control source; move to angle (pitch ±90°, roll/yaw ±180°, the limits `setGimbalSpeed()` enforces); hold-to-move rate buttons | Measured attitude, rates, flags, failure flags and the `GB_MODE` parameter, next to the last commanded angle and the difference |
-| Operate, right column | Photo/video mode, capture, start/stop recording; view source, record source and IR palette (VIO values from `vio_sdk.h`); hold-to-zoom and hold-to-focus, zoom to a percentage, auto focus; object tracking (below) | `CAMERA_CAPTURE_STATUS`, `STORAGE_INFORMATION`, `CAMERA_SETTINGS`, and the values the payload reports in its DEBUG stream |
-| Analyze › Telemetry | Request payload info and parameter streams | Component and camera identity, app version, rangefinder, and every DEBUG parameter with its age |
+| Operate, right column | Photo/video mode, capture, start/stop recording; view source, record source and IR palette (values from the selected model's `<model>_sdk.h`); hold-to-zoom and hold-to-focus, zoom to a percentage, auto focus; object tracking (below) | `CAMERA_CAPTURE_STATUS`, `STORAGE_INFORMATION`, `CAMERA_SETTINGS`, and the values the payload reports in its DEBUG stream |
+| Operate, right column | Object detection on and off; click a box to select it (nothing is sent); **Detection data…** opens a window with each packet's data | Seven states, boxes on the video, selected box's centre and size; in the window a live box table, summary, Pause and a 1000-packet log |
+| Operate, right column | IR FFC auto, manual and trigger; EO one-push white balance, on models that support them | ACK in Analyze › Commands; `FFC_MODE` under *Payload reports* |
+| Analyze › Telemetry | Request payload info and parameter streams; stream and FOV | Component and camera identity, app version, rangefinder, stream and FOV while fresh, and every DEBUG parameter with its age |
+| Analyze › Gimbal settings | Read the gimbal's parameters; write one after a confirmation | `PARAM_VALUE` per parameter, with its age and *N of M received* |
 | Analyze › Commands | — | Every action: outgoing frame, target, state, ACK result, queue and ACK latency. Double-click a frame number to open it in the inspector. |
 
 Notes:
@@ -430,8 +472,8 @@ transport and latency are in the SETTINGS drawer):
 - **Platform:** Ubuntu 24.04. Developed under WSL2 with WSLg. The SDK is POSIX-only, so there is
   no native Windows build.
 - **First payload:** VIO. The SDK library is model-agnostic. The `VIO/ZIO/MB1/ORUSL` defines only
-  pick a header of parameter names and enum values, so models will be selected at runtime from
-  capability tables built from those headers.
+  pick a header of parameter names and enum values, so models are selected at runtime from
+  capability tables built from those headers (now done: **Model** in the SETTINGS drawer).
 - **One connection owner:** the SDK's `UDP_Port` (client mode: target IP and port are set at runtime
   via `T_ConnInfo`, and the local port is ephemeral). The app never opens a second command channel.
 - **Inspector source:** the patch adds `PayloadSdkInterface::regTransportObserver()`. It receives
@@ -494,7 +536,7 @@ loopback fake payload and checks that `sdkQuit()` returns in under 2 s (measured
 | 9 | Filter, inspect frames, export logs | ✅ | Filters, details, hex view; CSV, JSON Lines, and tlog export and recording |
 | 10 | Watcher does not block the UI or control traffic | ✅ | Bounded queues; parsing on the GUI timer; files on a writer thread; video and capture on their own threads |
 | 11 | Disconnected hardware and unsupported features handled safely | ✅ | Controls disabled while disconnected; profile-driven options; OFF needs confirmation |
-| 12 | Automated tests for parsing, connection, logging | ✅ | 9 CTest programs, hardware-free |
+| 12 | Automated tests for parsing, connection, logging | ✅ | 10 CTest programs, hardware-free |
 | 13 | README covers dependencies, build, configuration, operation, testing, limitations | ✅ | This file |
 
 ## Known limitations
@@ -502,19 +544,14 @@ loopback fake payload and checks that `sdkQuit()` returns in under 2 s (measured
 - **Partly tested on hardware:** gimbal OFF, RESET and MAPPING (now through the flags), photo capture, and
   recording have not been run on a VIO. Move to angle does not work on VIO software 3.1.8.21, and tracking was
   last verified on 3.1.4.18.
-- **Payload models:** VIO, ZIO, MB1 and OrusL are selected with **Model** in the SETTINGS drawer. The choice is
-  saved with each connection profile and rebuilds the gimbal and camera panels. A header warning appears when the
-  payload reports another model name.
-  - **Values:** each `src/payload_profile_<model>.cpp` takes its IDs and values only from that model's
-    `<model>_sdk.h`.
-  - **Tested:** only VIO was run on hardware; ZIO, MB1 and OrusL are untested.
-  - **ZIO:** EO only (no IR palette, record source or rangefinder).
-  - **OrusL:** no gain setting (its header's gain IDs are empty).
-  - **MB1:** its `C_G_*` exposure aliases, zoom/focus speed and LRF have no values in its header; AE compensation
-    and isotherm temperatures are signed. None of these are offered.
-  - **Control source:** MB1's is `GB_FW_FLAG` Overwrite/Forward. ZIO's and OrusL's headers name none.
+- **Payload models (see *Supported payloads*):** only VIO was run on hardware. ZIO, MB1 and OrusL come only
+  from their SDK headers and are untested. Their parameter IDs, values, tracking and control source still need
+  a real unit.
   - **Not exposed:** zoom to an absolute level (`setCameraZoomTarget`, a custom `MAV_CMD_USER_4`), because its
     range is not documented per model.
+- **Not run on hardware:** object detection, stream and FOV telemetry, IR FFC, one-push white balance and gimbal
+  settings are tested only against the fake payload. A detected box cannot be sent to the tracker yet, and stream
+  settings, standby, restart, SpotAE and GPS forwarding are not built. See `docs/DEVELOPMENT_PROGRESS.md`.
 - **Live network capture:** checked only for its error path here (no root under WSL). The decoding
   and file path are tested with `.pcap` files written by libpcap.
 - **Video:** there is no recording or snapshot from the app (use the payload's own recording).
