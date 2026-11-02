@@ -121,3 +121,26 @@ Read-only. **SDK API** for the requests, **standard MAVLink** for the messages, 
 - **Not assumed:** `param2` for FOV is a Gremsy use of a standard field. How `camera_device_id` in the reply maps to EO and
   IR is unverified, so the raw number is shown. MAVLink defines 0 as "a MAVLink camera", so EO and IR replies could share
   an ID, in which case the newer one replaces the older.
+
+## Image calibration
+
+Custom Gremsy commands. All are `COMMAND_LONG` `MAV_CMD_USER_4` to the payload core (compid 26), with the unused
+params 0.
+
+| Control | App call | SDK call | param1 | param2 | param3 |
+|---|---|---|---|---|---|
+| FFC auto | `irFfcMode(true)` | `setPayloadCameraFFCMode(FFC_MODE_AUTO)` | 2 | 6 | 1 |
+| FFC manual | `irFfcMode(false)` | `setPayloadCameraFFCMode(FFC_MODE_MANUAL)` | 2 | 6 | 0 |
+| Trigger FFC | `irFfcTrigger()` | `setPayloadCameraFFCTrigg()` | 2 | 7 | 0 |
+| WB one push | `eoWbOnePush()` | `setPayloadCameraWBOnePushTrigg()` | 2 | 8 | 0 |
+
+- **Feedback:** `COMMAND_ACK` in Analyze › Commands. `COMMAND_ACK` names only the `MAV_CMD`, so answers to several
+  `USER_4` commands in flight are matched oldest first and cannot be told apart. Send them one at a time when checking
+  a result. An accepted ACK says the command was accepted, not that the picture changed.
+- **FFC mode read-back:** `getPayloadCameraFFCMode()` has an empty body and is not called. `irFfcMode()` starts the
+  `FFC_MODE` DEBUG stream (`setParamRate(PARAM_CAM_IR_FFC_MODE, 1000)`), shown under *Payload reports*. There is no
+  read-back for a trigger or for one-push.
+- **Model support:** FFC needs an IR camera, so ZIO has it disabled. One-push is enabled where the header defines
+  `PAYLOAD_CAMERA_VIDEO_WHITE_BALANCE_ONE_PUSH`, so MB1 has it disabled. The SDK itself gates neither command per model.
+- **Not assumed:** the SDK's FFC example selects the IR view first; the app does not change the view. Whether one-push
+  needs White balance = One push first is undocumented.

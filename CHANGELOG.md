@@ -13,6 +13,8 @@ Newest first. "Tested" means the hardware-free CTest suite unless a line says ha
 - `hw_vio_commands --steps detection,detection-forward`: built, not run.
 - **Stream and FOV telemetry:** Analyze › Telemetry shows `VIDEO_STREAM_INFORMATION` and `CAMERA_FOV_STATUS`, only while
   a reply is fresh. Tested with a fake payload; not run on hardware.
+- **Image calibration:** IR FFC auto, manual and trigger, and EO one-push white balance, offered only on models whose
+  SDK header supports them. Tested with a fake payload; not run on hardware.
 
 ### Not added, on purpose
 

@@ -110,6 +110,11 @@ public:
     bool detectionEnabled() const { return m_detEnabledMs >= 0; }
     DetectionState detectionStatus() const { return m_detState; }
     const DetectionFrame &detections() const { return m_detFrame; }  // empty unless packets are arriving
+
+    // Custom MAV_CMD_USER_4 commands, as the SDK's camera_ir_do_ffc_control and camera_eo_trigger_wb_onepush examples.
+    bool irFfcMode(bool automatic);  // also starts the FFC_MODE DEBUG stream: the only read-back, the SDK's getter is empty
+    bool irFfcTrigger();
+    bool eoWbOnePush();
     QString commandError() const { return m_commandError; }
 
     const CommandTracker &tracker() const { return m_tracker; }
@@ -140,6 +145,7 @@ private:
     void steerStep();                              // 100 ms, from poll()
     void endSteer(bool reached, const QString &detail);  // flags for the next rate/angle command; false (commandError) until the gimbal reported
     void sendStreamAndFovRequests();
+    void expectUser4(const QString &label, int param1, int param2, int param3);
     quint64 detectionStream(int intervalMs);  // returns the tracked command's id
     void updateDetection(const std::optional<det_packet_t> &packet, qint64 packetMs);
     void resetDetection();

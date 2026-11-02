@@ -463,6 +463,28 @@ CameraPage::CameraPage(PayloadLink *link, const MavlinkDict *dict, const Payload
         detection->addWidget(new QLabel(QStringLiteral("Detection not supported by %1").arg(QLatin1String(m_profile.name))), 0, 0);
     }
 
+    // Image calibration. Each answers only with an ACK (Analyze › Commands); only the FFC mode can be read back.
+    const QString noIr = QStringLiteral("Not supported by %1: it has no IR camera").arg(QLatin1String(m_profile.name));
+    QPushButton *ffcAuto = button(QStringLiteral("FFC auto"), m_profile.irFfc ? QStringLiteral("IR flat-field correction: the camera decides when (setPayloadCameraFFCMode)") : noIr);
+    QPushButton *ffcManual = button(QStringLiteral("FFC manual"), m_profile.irFfc ? QStringLiteral("IR flat-field correction: only on Trigger (setPayloadCameraFFCMode)") : noIr);
+    QPushButton *ffcTrigger = button(QStringLiteral("Trigger FFC"), m_profile.irFfc ? QStringLiteral("Runs one IR flat-field correction now (setPayloadCameraFFCTrigg). "
+                                                                                                     "The SDK example selects the IR view first; this does not change the view.") : noIr);
+    QPushButton *wbPush = button(QStringLiteral("WB one push"),
+                                 m_profile.wbOnePush ? QStringLiteral("EO one-push white balance (setPayloadCameraWBOnePushTrigg). Whether the camera must be on "
+                                                                      "White balance = One push first is not documented.")
+                                                     : QStringLiteral("Not supported by %1: its header defines no one-push white balance").arg(QLatin1String(m_profile.name)));
+    for (QPushButton *b : {ffcAuto, ffcManual, ffcTrigger}) b->setEnabled(m_profile.irFfc);
+    wbPush->setEnabled(m_profile.wbOnePush);
+    connect(ffcAuto, &QPushButton::clicked, this, [this] { report(m_link->irFfcMode(true)); });
+    connect(ffcManual, &QPushButton::clicked, this, [this] { report(m_link->irFfcMode(false)); });
+    connect(ffcTrigger, &QPushButton::clicked, this, [this] { report(m_link->irFfcTrigger()); });
+    connect(wbPush, &QPushButton::clicked, this, [this] { report(m_link->eoWbOnePush()); });
+    auto *calibration = new QGridLayout;
+    calibration->addWidget(ffcAuto, 0, 0);
+    calibration->addWidget(ffcManual, 0, 1);
+    calibration->addWidget(ffcTrigger, 1, 0);
+    calibration->addWidget(wbPush, 1, 1);
+
     // Settings: sent only on a user choice (activated), never when the combo is refreshed
     auto *settings = new QFormLayout;
     auto addParam = [&](const QString &label, const char *id, const std::vector<ParamOption> &opts) {
@@ -512,6 +534,7 @@ CameraPage::CameraPage(PayloadLink *link, const MavlinkDict *dict, const Payload
     cl->addWidget(group(QStringLiteral("ZOOM / FOCUS"), optics));
     cl->addWidget(group(QStringLiteral("TRACKING"), tracking));
     cl->addWidget(group(QStringLiteral("OBJECT DETECTION"), detection));
+    cl->addWidget(group(QStringLiteral("IMAGE CALIBRATION"), calibration));
     cl->addWidget(group(QStringLiteral("SETTINGS"), settings));
 
     m_capture = valueLabel();
@@ -624,6 +647,7 @@ void CameraPage::refresh()
         }
         else if (name == QLatin1String("REC_SRC")) v = option(m_profile.recordSources, it->value);
         else if (name == QLatin1String("PALETTE_ID")) v = option(m_profile.irPalettes, it->value);
+        else if (name == QLatin1String("FFC_MODE")) v = it->value == 0 ? QStringLiteral("manual") : it->value == 1 ? QStringLiteral("auto") : QString::number(it->value);
         else if (name == QLatin1String("EO_ZOOM") || name == QLatin1String("IR_ZOOM")) v = QStringLiteral("%1x").arg(it->value, 0, 'g', 4);
         else continue;
         parts << QStringLiteral("%1: %2").arg(name, v);

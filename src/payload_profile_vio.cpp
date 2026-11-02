@@ -49,6 +49,8 @@ const PayloadProfile &vioProfile()
         PAYLOAD_CAMERA_TRACKING_OBJ_TRACKING,
         PAYLOAD_CAMERA_TRACKING_OBJ_DETECTION,
         PAYLOAD_CAMERA_VIEW_EO,
+        true,
+        true,
         {
             {"Exposure", "Exposure mode", PAYLOAD_CAMERA_VIDEO_AUTO_EXPOSURE,
              {{PAYLOAD_CAMERA_VIDEO_EXPOSURE_AUTO, "Auto"},

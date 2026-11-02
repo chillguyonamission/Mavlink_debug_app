@@ -24,6 +24,8 @@ const PayloadProfile &zioProfile()
         PAYLOAD_CAMERA_TRACKING_OBJ_TRACKING,
         PAYLOAD_CAMERA_TRACKING_OBJ_DETECTION,
         PAYLOAD_CAMERA_VIEW_EO,
+        false,
+        true,  // EO only
         {
             {"Exposure", "Exposure mode", PAYLOAD_CAMERA_VIDEO_AUTO_EXPOSURE,
              {{PAYLOAD_CAMERA_VIDEO_EXPOSURE_AUTO, "Auto"},

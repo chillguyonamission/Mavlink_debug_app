@@ -3,6 +3,7 @@
 #include "main_window.h"
 #include "payload_pages.h"
 #include "payload_link.h"
+#include "payload_profile.h"
 #include "splash.h"
 #include "video_page.h"
 #include "theme.h"
@@ -472,6 +473,15 @@ private slots:
             auto *tabs = dialog->findChild<QTabWidget *>();
             QVERIFY2(tabs && tabs->count() >= 2, qPrintable(model->currentText()));
             dialog->close();
+            // Controls follow the profile, and a disabled one says why
+            const PayloadProfile &p = profileByName(model->currentText());
+            for (const auto &[text, supported] : {std::pair{"FFC auto", p.irFfc}, {"FFC manual", p.irFfc}, {"Trigger FFC", p.irFfc}, {"WB one push", p.wbOnePush}}) {
+                QPushButton *b = nullptr;
+                for (QPushButton *x : camera->findChildren<QPushButton *>()) if (x->text() == QLatin1String(text)) b = x;
+                QVERIFY2(b, text);
+                QCOMPARE(b->isEnabled(), supported);
+                QCOMPARE(b->toolTip().contains(QStringLiteral("Not supported")), !supported);
+            }
         }
 
         model->setCurrentText(QStringLiteral("ZIO"));

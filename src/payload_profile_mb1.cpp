@@ -63,6 +63,8 @@ const PayloadProfile &mb1Profile()
         PAYLOAD_CAMERA_TRACKING_OBJ_TRACKING,
         PAYLOAD_CAMERA_TRACKING_OBJ_DETECTION,
         PAYLOAD_CAMERA_VIEW_EO,
+        true,
+        false,  // mb1_sdk.h defines no one-push white balance
         {
             {"Exposure", "Camera profile", PAYLOAD_CAMERA_EO_PROFILE,
              {{PAYLOAD_CAMERA_EO_PROFILE_CUSTOM, "Custom (settings below)"},

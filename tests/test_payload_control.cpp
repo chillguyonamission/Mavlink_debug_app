@@ -342,6 +342,61 @@ private slots:
         QVERIFY(!o.attitude && !o.eoZoom && !o.recording && !o.trackStatus && !o.trackBox);
     }
 
+    // Every parameter of each custom command, since they share MAV_CMD_USER_4
+    void imageCalibrationOnTheWire()
+    {
+        QCOMPARE(vioProfile().irFfc && mb1Profile().irFfc && oruslProfile().irFfc, true);
+        QVERIFY(!zioProfile().irFfc);  // EO only
+        QCOMPARE(vioProfile().wbOnePush && zioProfile().wbOnePush && oruslProfile().wbOnePush, true);
+        QVERIFY(!mb1Profile().wbOnePush);
+
+        PayloadLink link;
+        QVERIFY(!link.irFfcMode(true) && !link.irFfcTrigger() && !link.eoWbOnePush());
+        FakePayload fake;
+        link.connectTo(QStringLiteral("127.0.0.1"), fake.port);
+        QTRY_STATE(link, LinkState::SocketOpen, 5000);
+        QVERIFY(fake.learnAppEndpoint());
+        auto user4 = [](const MavFrame &x) { return x.msgid == MAVLINK_MSG_ID_COMMAND_LONG && mavlink_msg_command_long_get_command(&x.msg) == MAV_CMD_USER_4; };
+        auto checkFrame = [&](float p2, float p3) {
+            MavFrame f;
+            QVERIFY(waitTx(fake, user4, &f));
+            QCOMPARE(int(f.targetComponent), int(TelemetryStore::kPayloadCore));
+            QCOMPARE(int(mavlink_msg_command_long_get_confirmation(&f.msg)), 1);
+            QCOMPARE(mavlink_msg_command_long_get_param1(&f.msg), 2.f);
+            QCOMPARE(mavlink_msg_command_long_get_param2(&f.msg), p2);
+            QCOMPARE(mavlink_msg_command_long_get_param3(&f.msg), p3);
+            QCOMPARE(mavlink_msg_command_long_get_param4(&f.msg), 0.f);
+            QCOMPARE(mavlink_msg_command_long_get_param5(&f.msg), 0.f);
+            QCOMPARE(mavlink_msg_command_long_get_param6(&f.msg), 0.f);
+            QCOMPARE(mavlink_msg_command_long_get_param7(&f.msg), 0.f);
+        };
+
+        QVERIFY(link.irFfcMode(true));
+        // The read-back stream: FFC_MODE's index, every second
+        MavFrame stream;
+        QVERIFY(waitTx(fake, [](const MavFrame &x) {
+            return x.msgid == MAVLINK_MSG_ID_COMMAND_LONG && mavlink_msg_command_long_get_command(&x.msg) == MAV_CMD_SET_MESSAGE_INTERVAL &&
+                   PayloadLink::payloadParamName(int(mavlink_msg_command_long_get_param1(&x.msg))) == QStringLiteral("FFC_MODE") &&
+                   mavlink_msg_command_long_get_param2(&x.msg) == 1000000.f;
+        }, &stream));
+        checkFrame(6, 1);
+        QVERIFY(link.irFfcMode(false));
+        checkFrame(6, 0);
+        QVERIFY(link.irFfcTrigger());
+        checkFrame(7, 0);
+        QVERIFY(link.eoWbOnePush());
+        checkFrame(8, 0);
+
+        // The ACK has only the MAV_CMD: answered in order, and a rejection is shown as one
+        for (const QString &label : {QStringLiteral("IR FFC mode: auto"), QStringLiteral("IR FFC mode: manual"), QStringLiteral("IR FFC: trigger"), QStringLiteral("EO white balance: one push")})
+            QTRY_VERIFY_WITH_TIMEOUT(find(link, label)->state == TrackedCommand::Sent, 3000);
+        fake.send(commandAck(TelemetryStore::kPayloadCore, MAV_CMD_USER_4, MAV_RESULT_ACCEPTED));
+        fake.send(commandAck(TelemetryStore::kPayloadCore, MAV_CMD_USER_4, MAV_RESULT_UNSUPPORTED));
+        QTRY_VERIFY_WITH_TIMEOUT(find(link, QStringLiteral("IR FFC mode: auto"))->state == TrackedCommand::Accepted, 3000);
+        QTRY_VERIFY_WITH_TIMEOUT(find(link, QStringLiteral("IR FFC mode: manual"))->state == TrackedCommand::Rejected, 3000);
+        QCOMPARE(find(link, QStringLiteral("IR FFC mode: manual"))->result, int(MAV_RESULT_UNSUPPORTED));
+    }
+
     void streamAndFovAreKeptPerStreamAndCamera()
     {
         TelemetryStore s;

@@ -487,6 +487,44 @@ bool PayloadLink::trackingStreams()
     return true;
 }
 
+// Several functions share MAV_CMD_USER_4: the parameters tell the frames apart, the ACK carries only the MAV_CMD
+void PayloadLink::expectUser4(const QString &label, int param1, int param2, int param3)
+{
+    m_tracker.expect(label, MAVLINK_MSG_ID_COMMAND_LONG, MAV_CMD_USER_4, {}, nowMs(), [param1, param2, param3](const MavFrame &f) {
+        return int(mavlink_msg_command_long_get_param1(&f.msg)) == param1 && int(mavlink_msg_command_long_get_param2(&f.msg)) == param2 &&
+               int(mavlink_msg_command_long_get_param3(&f.msg)) == param3;
+    });
+}
+
+bool PayloadLink::irFfcMode(bool automatic)
+{
+    if (!ready()) return false;
+    const ffc_mode_t mode = automatic ? FFC_MODE_AUTO : FFC_MODE_MANUAL;
+    m_sdk->setParamRate(PARAM_CAM_IR_FFC_MODE, 1000);
+    expectUser4(automatic ? QStringLiteral("IR FFC mode: auto") : QStringLiteral("IR FFC mode: manual"), 2, 6, mode);
+    m_sdk->setPayloadCameraFFCMode(mode);
+    emit commandsChanged();
+    return true;
+}
+
+bool PayloadLink::irFfcTrigger()
+{
+    if (!ready()) return false;
+    expectUser4(QStringLiteral("IR FFC: trigger"), 2, 7, 0);
+    m_sdk->setPayloadCameraFFCTrigg();
+    emit commandsChanged();
+    return true;
+}
+
+bool PayloadLink::eoWbOnePush()
+{
+    if (!ready()) return false;
+    expectUser4(QStringLiteral("EO white balance: one push"), 2, 8, 0);
+    m_sdk->setPayloadCameraWBOnePushTrigg();
+    emit commandsChanged();
+    return true;
+}
+
 quint64 PayloadLink::detectionStream(int intervalMs)
 {
     const quint64 id = m_tracker.expect(intervalMs ? QStringLiteral("Detection stream every %1 ms").arg(intervalMs) : QStringLiteral("Detection stream: stop"),

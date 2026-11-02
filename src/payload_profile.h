@@ -36,6 +36,8 @@ struct PayloadProfile {
     unsigned trackingObjectMode;
     unsigned trackingDetectionMode;  // the same parameter's value for onboard object detection: the two exclude each other
     unsigned viewSourceEo;           // the EO-only view, the one the SDK's detection example selects
+    bool irFfc;      // has an IR camera, which the SDK's FFC commands act on
+    bool wbOnePush;  // the header defines white balance "one push"
     std::vector<CameraSetting> cameraSettings;
     // The payload's gimbal control source: gimbal commands from this app pass only when it is gimbalControlOnboard
     const char *gimbalControlId = nullptr;

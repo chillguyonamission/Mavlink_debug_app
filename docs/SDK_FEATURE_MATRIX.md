@@ -45,7 +45,8 @@ Every public `PayloadSdkInterface` API in `fba3c70`, and what this app does with
 | `setPayloadCameraStopImage` | Available, unused | | The app takes single shots |
 | `getPayloadCameraMode`, `getPayloadStorage`, `getPayloadCaptureStatus`, `getPayloadCameraInformation`, `getPayloadComponentBasicInformation` | Implemented | yes | |
 | `getPayloadCameraStreamingInformation`, `getPayloadCameraFOVStatus` | Implemented | no | Read-only, Analyze › Telemetry. ZIO has no IR, so its IR request should go unanswered |
-| `setPayloadCameraFFCMode`, `setPayloadCameraFFCTrigg`, `setPayloadCameraWBOnePushTrigg` | Available, unused | | |
+| `setPayloadCameraFFCMode`, `setPayloadCameraFFCTrigg` | Implemented | no | VIO, MB1, OrusL (ZIO has no IR). Operate › IMAGE CALIBRATION |
+| `setPayloadCameraWBOnePushTrigg` | Implemented | no | VIO, ZIO, OrusL (`mb1_sdk.h` has no one-push value) |
 | `getPayloadCameraFFCMode` | Unsupported | | Empty body: it returns nothing |
 | `setCameraExtSettings_SpotAE_*` | Needs verification | | OrusL only; no unit to check on |
 
