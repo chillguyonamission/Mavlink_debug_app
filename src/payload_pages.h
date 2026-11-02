@@ -2,9 +2,12 @@
 // Payload control and status pages. Commands go through PayloadLink (SDK API, tracked);
 // everything displayed as measured comes from validated RX frames (PayloadLink::telemetry()).
 
+#include "detection.h"
+
 #include <QPointF>
 #include <QWidget>
 
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -16,6 +19,7 @@ class QComboBox;
 class QDialog;
 class QDoubleSpinBox;
 class QLabel;
+class QListWidget;
 class QPushButton;
 class QSlider;
 class QSpinBox;
@@ -99,7 +103,7 @@ private:
     const PayloadProfile &m_profile;
     QSlider *m_zoomRange;
     QPushButton *m_recBtn, *m_armBtn = nullptr, *m_centreBtn = nullptr;
-    QDialog *m_settingsDialog = nullptr;
+    QDialog *m_settingsDialog = nullptr, *m_detectionDialog = nullptr;
     QLabel *m_zoomReadout, *m_track = nullptr, *m_detection = nullptr;
     QLabel *m_capture, *m_video, *m_storage, *m_settings, *m_reported;
     bool m_trackArmed = false;
@@ -141,6 +145,26 @@ protected:
 private:
     QLabel *m_component, *m_camera, *m_distance, *m_stream, *m_fov;
     QTableWidget *m_params;
+};
+
+// The detection packets as data, in a window of its own: the newest packet's boxes and a log of recent packets. Read-only.
+class DetectionDataPage : public QWidget
+{
+    Q_OBJECT
+public:
+    explicit DetectionDataPage(PayloadLink *link, QWidget *parent = nullptr);
+
+private:
+    void refresh();  // 4 Hz and on every packet, only while visible: a reopened window catches up from the link's log
+    void setPaused(bool paused);
+
+    PayloadLink *m_link;
+    QLabel *m_state, *m_summary;
+    QPushButton *m_pause;
+    QTableWidget *m_table;
+    QListWidget *m_log;
+    quint64 m_logged = 0;  // detectionLogTotal() already in m_log
+    std::optional<DetectionFrame> m_frozen;  // what the table shows while paused
 };
 
 // The gimbal's own parameters. A separate page from GimbalPage: these are stored settings, not motion.

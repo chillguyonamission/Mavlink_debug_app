@@ -35,7 +35,7 @@ version 1, `num_boxes`, `frame_id`, then up to 20 boxes of 12 bytes.
 | `x`, `y` | Top-left corner, in 1920×1080 reference pixels |
 | `w`, `h` | Size, same space |
 | `track_id` | 0 = no track assigned yet |
-| `class_id` | Depends on the model loaded on the payload. No names are shown. The SDK example's COCO table applies only to its EO model, and it warns that IR IDs differ |
+| `class_id` | Depends on the model loaded on the payload. The video overlay shows the number only. The data window adds a name marked as a guess: the SDK example's COCO table applies only to its EO model, and it warns that IR IDs differ |
 | `confidence` | 0–255 = 0–100% |
 
 The packet has no timestamp and no video frame reference.
@@ -93,6 +93,26 @@ Active, because that is what the payload is doing.
 
 To keep the two apart, **Select target** stops the detection stream before its unchanged sequence, and **Enable
 detection** first stops an armed tracker, so a later click cannot send a target by accident.
+
+### Data window
+
+Application side, read-only: the **Detection data…** button in Operate › OBJECT DETECTION opens a separate, non-modal
+window. It sends nothing.
+
+| Part | Content |
+|---|---|
+| State | The same state as the panel. Stays live while paused |
+| Summary | Frame ID, valid and claimed boxes, age of the last packet, packets per second over the last 2 s |
+| Newest packet | Track, class, confidence, x, y, w, h, centre. Empties when packets go stale |
+| Log | Last 1000 packets, newest first: receive time, frame ID, box count, invalid count |
+| Pause | Freezes the table and log. Packets keep being recorded and appear on Resume, up to the 1000 limit |
+
+- **Receive time** is this PC's clock when the SDK delivered the packet, because the packet has no timestamp.
+- **Class:** `3 (motorcycle?)` is the number plus a guess from the SDK example's COCO table. An ID above 79 shows only the
+  number. The guess is yours to judge against the picture: it can be wrong on IR or on another model.
+- **Invalid boxes** appear only as a count, not as rows.
+- The log is cleared on connecting. It stays readable after a disconnect while the window is open; the button itself is
+  disabled while disconnected, like the rest of the panel.
 
 ### Limits
 

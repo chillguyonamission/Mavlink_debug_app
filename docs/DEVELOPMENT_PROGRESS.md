@@ -8,6 +8,7 @@ loopback, never a real unit.
 | Phase | State | Software tests | Hardware |
 |---|---|---|---|
 | Object detection and bounding boxes | Implemented; forwarding to the tracker held back | `detection`, `main_window` | **Not run** |
+| Detection data window | Implemented | `detection`, `main_window` | **Not run** |
 | 1. Stream and FOV telemetry | Implemented | `payload_control`, `main_window` | **Not run** |
 | 2. IR FFC, EO one-push white balance | Implemented | `payload_control`, `main_window` | **Not run** |
 | 3. Gimbal settings read and write | Implemented | `payload_control`, `main_window` | **Not run** |
@@ -26,6 +27,7 @@ Each of these needs your go-ahead, because it changes payload state.
 | Detection on a VIO | `hw_vio_commands --ip <IP> --steps detection` (TRACK_MODE changes, then is restored; nothing moves) | Do packets arrive? Do real boxes pass validation? Does rate 0 stop them? |
 | Forwarding | `hw_vio_commands --ip <IP> --steps detection-forward` (**the gimbal follows**, then returns) | Does a detected box work as a tracker target after TRACK_MODE returns to tracking? |
 | Overlay | Operate, with video and an object in view | Do boxes sit on the objects, at the stream's real resolution? |
+| Data window | Detection data…, while detection runs | Do real frame IDs increase by one? Do the COCO guesses match what the camera sees? |
 | Stream and FOV | Open Analyze › Telemetry (read-only) | Does the payload answer? Which `camera_device_id` does each FOV reply carry? |
 | FFC and white balance | Buttons in Operate › IMAGE CALIBRATION, one at a time (changes camera state) | Does each get an ACK? Does `FFC_MODE` appear and follow the mode? Does one-push need White balance = One push? |
 | Gimbal settings, read | Analyze › Gimbal settings › Read from gimbal (read-only) | Does the gimbal answer? How many replies are lost? Which types does it report? |
@@ -42,5 +44,6 @@ Run on 2026-11-02, native Ubuntu, build directory outside the repository (see `d
 | After phase 1 | 10/10 passed |
 | After phase 2 | 10/10 passed |
 | After phase 3 and final docs | 10/10 passed |
+| After the detection data window, in `build/` | 10/10 passed |
 
 `hw_vio_commands` was built and never run. No payload was connected or commanded during this work.

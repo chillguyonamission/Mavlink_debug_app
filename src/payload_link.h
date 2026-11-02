@@ -16,6 +16,7 @@
 #include <QTimer>
 
 #include <atomic>
+#include <deque>
 #include <mutex>
 #include <optional>
 #include <vector>
@@ -110,6 +111,10 @@ public:
     bool detectionEnabled() const { return m_detEnabledMs >= 0; }
     DetectionState detectionStatus() const { return m_detState; }
     const DetectionFrame &detections() const { return m_detFrame; }  // empty unless packets are arriving
+    // Every packet this connection, up to kDetectionLogSize, oldest first. It outlives stale data and detectionStop().
+    const std::deque<DetectionFrame> &detectionLog() const { return m_detLog; }
+    quint64 detectionLogTotal() const { return m_detLogTotal; }  // never drops with the log's limit; 0 again on connecting
+    static constexpr size_t kDetectionLogSize = 1000, kMaxPendingDetections = 64;
 
     // Custom MAV_CMD_USER_4 commands, as the SDK's camera_ir_do_ffc_control and camera_eo_trigger_wb_onepush examples.
     bool irFfcMode(bool automatic);  // also starts the FFC_MODE DEBUG stream: the only read-back, the SDK's getter is empty
@@ -152,7 +157,11 @@ private:
     void sendStreamAndFovRequests();
     void expectUser4(const QString &label, int param1, int param2, int param3);
     quint64 detectionStream(int intervalMs);  // returns the tracked command's id
-    void updateDetection(const std::optional<det_packet_t> &packet, qint64 packetMs);
+    struct DetPacket {
+        det_packet_t packet;
+        qint64 monoMs, wallMs;
+    };
+    void updateDetection(const std::vector<DetPacket> &packets);
     void resetDetection();
     template <class Work, class Done> void runInWorker(Work work, Done done);
 
@@ -171,8 +180,7 @@ private:
     std::vector<Datagram> m_pending;
     quint64 m_nextSeq = 0;
     std::atomic<quint64> m_dropped{0};
-    std::optional<det_packet_t> m_detPacket;  // newest only: a slow GUI skips packets, it never queues them
-    qint64 m_detPacketMs = -1;
+    std::vector<DetPacket> m_detPackets;  // bounded: a stalled GUI loses the oldest
 
     // GUI thread only
     const MavlinkDict *m_dict = nullptr;
@@ -203,6 +211,8 @@ private:
     quint16 m_modeFlags = 0;  // last mode commanded by gimbalMode()
     qint64 m_modeFlagsMs = -1;
     DetectionFrame m_detFrame;
+    std::deque<DetectionFrame> m_detLog;
+    quint64 m_detLogTotal = 0;
     DetectionState m_detState = DetectionState::Off;
     qint64 m_detEnabledMs = -1, m_detLastMs = -1;
     quint64 m_detModeCmd = 0, m_detStreamCmd = 0;  // tracked commands whose rejection means "refused"

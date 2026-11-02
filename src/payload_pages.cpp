@@ -7,6 +7,8 @@
 #include "ui_util.h"
 
 #include <QAbstractItemView>
+#include <QDateTime>
+#include <QListWidget>
 #include <QComboBox>
 #include <QDialog>
 #include <QDoubleSpinBox>
@@ -70,6 +72,13 @@ static QGroupBox *group(const QString &title, QLayout *layout)
     auto *g = new QGroupBox(title);
     g->setLayout(layout);
     return g;
+}
+
+static const char *detectionColor(DetectionState s)
+{
+    return detectionLive(s) ? Theme::Ok
+           : s == DetectionState::Off ? Theme::Dim
+           : s == DetectionState::Waiting || s == DetectionState::Stale ? Theme::Warn : Theme::Bad;
 }
 
 // --- Gimbal ----------------------------------------------------------------------------------
@@ -454,11 +463,27 @@ CameraPage::CameraPage(PayloadLink *link, const MavlinkDict *dict, const Payload
             report(m_link->detectionStop() &&
                    m_link->cameraParam(QStringLiteral("Detection off: object tracking mode"), m_profile.trackingModeId, m_profile.trackingObjectMode));
         });
+        QPushButton *detData = button(QStringLiteral("Detection data…"), QStringLiteral("Opens a window with each packet's boxes and a log of recent packets. Sends nothing."));
+        connect(detData, &QPushButton::clicked, this, [this] {
+            if (!m_detectionDialog) {
+                m_detectionDialog = new QDialog(this);
+                m_detectionDialog->setObjectName(QStringLiteral("detectionDataWindow"));
+                m_detectionDialog->setWindowTitle(QStringLiteral("AI detection data · %1").arg(QLatin1String(m_profile.name)));
+                auto *l = new QVBoxLayout(m_detectionDialog);
+                l->setContentsMargins(0, 0, 0, 0);
+                l->addWidget(new DetectionDataPage(m_link));
+                m_detectionDialog->resize(760, 640);
+            }
+            m_detectionDialog->show();
+            m_detectionDialog->raise();
+            m_detectionDialog->activateWindow();
+        });
         m_detection = valueLabel();
         m_detection->setWordWrap(true);
         detection->addWidget(detOn, 0, 0);
         detection->addWidget(detOff, 0, 1);
-        detection->addWidget(m_detection, 1, 0, 1, 2);
+        detection->addWidget(detData, 1, 0, 1, 2);
+        detection->addWidget(m_detection, 2, 0, 1, 2);
     } else {
         detection->addWidget(new QLabel(QStringLiteral("Detection not supported by %1").arg(QLatin1String(m_profile.name))), 0, 0);
     }
@@ -674,10 +699,7 @@ void CameraPage::refresh()
     if (m_detection) {
         const DetectionState s = m_link->detectionStatus();
         const DetectionFrame &d = m_link->detections();
-        const char *color = detectionLive(s) ? Theme::Ok
-                            : s == DetectionState::Off ? Theme::Dim
-                            : s == DetectionState::Waiting || s == DetectionState::Stale ? Theme::Warn : Theme::Bad;
-        QString t = colored(detectionStateText(s).toHtmlEscaped(), color);
+        QString t = colored(detectionStateText(s).toHtmlEscaped(), detectionColor(s));
         if (detectionLive(s)) {
             t += colored(QStringLiteral(" · boxes: %1 · frame %2").arg(d.boxes.size()).arg(d.frameId), Theme::Dim);
             if (d.rejected) t += colored(QStringLiteral(" · %1 invalid").arg(d.rejected), Theme::Warn);
@@ -963,6 +985,113 @@ void TelemetryPage::refresh()
             item->setText(cells[col]);
             item->setForeground(age * 1000 > to ? QColor(Theme::Dim) : palette().text().color());
         }
+    }
+}
+
+// --- Detection data --------------------------------------------------------------------------
+
+DetectionDataPage::DetectionDataPage(PayloadLink *link, QWidget *parent)
+    : QWidget(parent), m_link(link), m_state(valueLabel()), m_summary(valueLabel()), m_pause(button(QStringLiteral("Pause"))),
+      m_table(new QTableWidget(0, 8)), m_log(new QListWidget)
+{
+    m_pause->setToolTip(QStringLiteral("Freezes the table and the log for reading. Packets keep being logged, and appear on Resume."));
+    connect(m_pause, &QPushButton::clicked, this, [this] { setPaused(!m_frozen); });
+    auto *head = new QHBoxLayout;
+    head->addWidget(m_state, 1);
+    head->addWidget(m_pause);
+
+    m_summary->setFont(monoFont(10));
+    m_table->setHorizontalHeaderLabels({QStringLiteral("Track"), QStringLiteral("Class"), QStringLiteral("Confidence"), QStringLiteral("X"), QStringLiteral("Y"),
+                                        QStringLiteral("W"), QStringLiteral("H"), QStringLiteral("Centre")});
+    m_table->verticalHeader()->hide();
+    m_table->horizontalHeader()->setStretchLastSection(true);
+    m_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    m_table->setSelectionMode(QAbstractItemView::NoSelection);
+    m_table->verticalHeader()->setDefaultSectionSize(m_table->fontMetrics().height() + 6);
+    m_table->setColumnWidth(1, 170);
+    for (int col : {3, 4, 5, 6}) m_table->setColumnWidth(col, 60);
+    auto *boxes = new QVBoxLayout;
+    boxes->addWidget(m_table);
+    auto *note = new QLabel(QStringLiteral("x, y are the top-left corner in 1920×1080 pixels. The packet carries only a class number: names with \"?\" are a guess from "
+                                           "the COCO table in the SDK's example for its EO model, and IR or other models number classes differently."));
+    note->setWordWrap(true);
+    boxes->addWidget(note);
+    m_log->setFont(monoFont(9));
+    auto *logBox = new QVBoxLayout;
+    logBox->addWidget(m_log);
+
+    auto *l = new QVBoxLayout(this);
+    l->addLayout(head);
+    l->addWidget(m_summary);
+    l->addWidget(group(QStringLiteral("NEWEST PACKET"), boxes), 3);
+    l->addWidget(group(QStringLiteral("LOG (LAST %1 PACKETS, NEWEST FIRST)").arg(PayloadLink::kDetectionLogSize), logBox), 2);
+
+    connect(link, &PayloadLink::detectionsChanged, this, &DetectionDataPage::refresh);
+    auto *t = new QTimer(this);
+    connect(t, &QTimer::timeout, this, &DetectionDataPage::refresh);
+    t->start(250);
+}
+
+void DetectionDataPage::setPaused(bool paused)
+{
+    if (paused) m_frozen = m_link->detections();
+    else m_frozen.reset();
+    m_pause->setText(paused ? QStringLiteral("Resume") : QStringLiteral("Pause"));
+    refresh();
+}
+
+void DetectionDataPage::refresh()
+{
+    if (!isVisible()) return;
+    const auto clock = [](qint64 wallMs) { return QDateTime::fromMSecsSinceEpoch(wallMs).toString(QStringLiteral("HH:mm:ss.zzz")); };
+    const auto counts = [](const DetectionFrame &f) { return QStringLiteral("%1 valid / %2 claimed").arg(f.boxes.size()).arg(f.boxes.size() + size_t(f.rejected)); };
+    const DetectionState s = m_link->detectionStatus();
+    m_state->setText(colored(detectionStateText(s).toHtmlEscaped(), detectionColor(s)));  // live even while paused
+    const auto &log = m_link->detectionLog();
+    const quint64 total = m_link->detectionLogTotal();
+    if (total < m_logged) {  // a new connection
+        m_log->clear();
+        m_logged = 0;
+    }
+
+    if (m_frozen) {
+        const QString newer = QStringLiteral("%1 newer packets").arg(total - m_logged);
+        m_summary->setText(m_frozen->wallMs ? QStringLiteral("Paused at frame %1 · %2 · received %3 · %4").arg(m_frozen->frameId).arg(counts(*m_frozen), clock(m_frozen->wallMs), newer)
+                                            : QStringLiteral("Paused, no live packet · %1").arg(newer));
+        return;
+    }
+
+    for (size_t i = log.size() - size_t(std::min<quint64>(total - m_logged, log.size())); i < log.size(); ++i) {
+        const DetectionFrame &f = log[i];
+        const int n = int(f.boxes.size());
+        m_log->insertItem(0, QStringLiteral("%1  %2  %3 box%4%5").arg(clock(f.wallMs)).arg(f.frameId).arg(n).arg(n == 1 ? "" : "es")
+                                 .arg(f.rejected ? QStringLiteral(", %1 invalid").arg(f.rejected) : QString()));
+    }
+    while (m_log->count() > int(PayloadLink::kDetectionLogSize)) delete m_log->takeItem(m_log->count() - 1);
+    m_logged = total;
+
+    const std::vector<DetectionBox> &boxes = m_link->detections().boxes;
+    m_table->setRowCount(int(boxes.size()));
+    for (int row = 0; row < int(boxes.size()); ++row) {
+        const DetectionBox &b = boxes[size_t(row)];
+        const QRectF r(b.rect);
+        const QString cells[8] = {b.trackId ? QStringLiteral("#%1").arg(b.trackId) : QStringLiteral("—"), detectionClassGuess(b.classId),
+                                  QStringLiteral("%1%").arg(detectionConfidencePercent(b)), QString::number(b.rect.x()), QString::number(b.rect.y()),
+                                  QString::number(b.rect.width()), QString::number(b.rect.height()),
+                                  QStringLiteral("%1, %2").arg(r.center().x(), 0, 'f', 1).arg(r.center().y(), 0, 'f', 1)};
+        for (int col = 0; col < 8; ++col) {
+            QTableWidgetItem *item = m_table->item(row, col);
+            if (!item) m_table->setItem(row, col, item = new QTableWidgetItem);
+            item->setText(cells[col]);
+        }
+    }
+
+    if (log.empty()) {
+        m_summary->setText(colored(QStringLiteral("No packets received"), Theme::Dim));
+    } else {
+        const qint64 now = PayloadLink::monoNs() / 1000000;
+        m_summary->setText(QStringLiteral("%1 %2 · %3 · %4 s ago · %5 pkt/s").arg(detectionLive(s) ? QStringLiteral("Frame") : QStringLiteral("Last frame")).arg(log.back().frameId)
+                               .arg(counts(log.back())).arg(double(now - log.back().monoMs) / 1000, 0, 'f', 1).arg(detectionRate(log, now), 0, 'f', 1));
     }
 }
 

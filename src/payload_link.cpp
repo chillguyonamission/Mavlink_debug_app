@@ -68,6 +68,8 @@ void PayloadLink::connectTo(const QString &ip, int port)
     m_streamPollMs = -1;
     m_autoInfoSent = false;
     resetDetection();
+    m_detLog.clear();
+    m_detLogTotal = 0;
 
     T_ConnInfo ci{};
     ci.type = CONTROL_UDP;
@@ -77,10 +79,11 @@ void PayloadLink::connectTo(const QString &ip, int port)
     m_sdk->regTransportObserver([this](int dir, const uint8_t *d, int len, const sockaddr_in *peer, int err) {
         onTransport(dir, d, len, peer, err);
     });
-    m_sdk->regPayloadDetectionChanged([this](const det_packet_t &pkt) {  // SDK receive thread: latch only
+    m_sdk->regPayloadDetectionChanged([this](const det_packet_t &pkt) {  // SDK receive thread: copy and queue only
+        const qint64 wall = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
         std::lock_guard<std::mutex> lock(m_mutex);
-        m_detPacket = pkt;
-        m_detPacketMs = monoNs() / 1000000;
+        if (m_detPackets.size() >= kMaxPendingDetections) m_detPackets.erase(m_detPackets.begin());
+        m_detPackets.push_back({pkt, monoNs() / 1000000, wall});
     });
 
     setState(LinkState::Connecting);
@@ -132,13 +135,11 @@ void PayloadLink::onTransport(int dir, const uint8_t *data, int len, const socka
 void PayloadLink::poll()
 {
     std::vector<Datagram> batch;
-    std::optional<det_packet_t> detPacket;
-    qint64 detPacketMs;
+    std::vector<DetPacket> detPackets;
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         batch.swap(m_pending);
-        detPacket.swap(m_detPacket);
-        detPacketMs = m_detPacketMs;
+        detPackets.swap(m_detPackets);
     }
 
     std::vector<CapturedFrame> out;
@@ -177,7 +178,7 @@ void PayloadLink::poll()
     steerStep();
     if (!out.empty()) emit framesCaptured(out);
     if (commands) emit commandsChanged();
-    updateDetection(detPacket, detPacketMs);
+    updateDetection(detPackets);
 
     // Once per connection, as Gremsy's ui_demo does: ask for info and start the parameter streams. The SDK addresses
     // the camera at compid 101 until its own message thread has handled a camera frame, which comes after this
@@ -586,7 +587,7 @@ bool PayloadLink::detectionEnable(const char *modeId, quint32 detectionValue)
         if (m_detEnabledMs != enabled || !m_sdk || !isOpen(m_state)) return;  // stopped or reconnected meanwhile
         m_detStreamCmd = detectionStream(100);
     });
-    updateDetection({}, -1);
+    updateDetection({});
     return true;
 }
 
@@ -598,13 +599,16 @@ bool PayloadLink::detectionStop()
     return true;
 }
 
-void PayloadLink::updateDetection(const std::optional<det_packet_t> &packet, qint64 packetMs)
+void PayloadLink::updateDetection(const std::vector<DetPacket> &packets)
 {
-    bool changed = false;
-    if (packet) {
-        m_detFrame = parseDetectionPacket(*packet);
-        m_detLastMs = packetMs;
-        changed = true;
+    bool changed = !packets.empty();
+    for (const DetPacket &p : packets) {
+        m_detFrame = parseDetectionPacket(p.packet);
+        m_detFrame.monoMs = m_detLastMs = p.monoMs;
+        m_detFrame.wallMs = p.wallMs;
+        m_detLog.push_back(m_detFrame);
+        ++m_detLogTotal;
+        if (m_detLog.size() > kDetectionLogSize) m_detLog.pop_front();
     }
     bool rejected = false;
     for (const TrackedCommand &t : m_tracker.commands())
@@ -622,7 +626,7 @@ void PayloadLink::resetDetection()
 {
     {
         std::lock_guard<std::mutex> lock(m_mutex);
-        m_detPacket.reset();
+        m_detPackets.clear();
     }
     m_detEnabledMs = m_detLastMs = -1;
     m_detModeCmd = m_detStreamCmd = 0;

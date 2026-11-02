@@ -137,6 +137,68 @@ private slots:
         QCOMPARE(f.rejected, 199);
     }
 
+    void classNamesAreMarkedGuesses()
+    {
+        QCOMPARE(detectionClassGuess(0), QStringLiteral("0 (person?)"));
+        QCOMPARE(detectionClassGuess(3), QStringLiteral("3 (motorcycle?)"));
+        QCOMPARE(detectionClassGuess(79), QStringLiteral("79 (toothbrush?)"));
+        QCOMPARE(detectionClassGuess(80), QStringLiteral("80"));  // outside the table: only the number
+        QCOMPARE(detectionClassGuess(255), QStringLiteral("255"));
+        QCOMPARE(detectionLabel(DetectionBox{{}, 0, 3, 255}), QStringLiteral("class 3 100%"));  // the video overlay does not guess
+    }
+
+    void packetRateCountsTheLastTwoSeconds()
+    {
+        std::deque<DetectionFrame> log;
+        QCOMPARE(detectionRate(log, 10000), 0.0);
+        for (qint64 ms = 5000; ms <= 10000; ms += 100) {
+            log.push_back({});
+            log.back().monoMs = ms;
+        }
+        QCOMPARE(detectionRate(log, 10000), 10.0);   // 20 packets in 2 s
+        QCOMPARE(detectionRate(log, 11000), 5.0);    // the stream stopped 1 s ago
+        QCOMPARE(detectionRate(log, 13000), 0.0);
+    }
+
+    void everyPacketIsLoggedAndTheLogIsBounded()
+    {
+        PayloadLink link;
+        FakePayload fake;
+        link.connectTo(QStringLiteral("127.0.0.1"), fake.port);
+        QTRY_COMPARE_WITH_TIMEOUT(link.state(), LinkState::SocketOpen, 5000);
+        QVERIFY(fake.learnAppEndpoint());
+
+        // Several between two polls: all kept, in order, each with its receive time
+        for (uint32_t id = 1; id <= 5; ++id) fake.send(frameOf(packetOf({{1, 1, 9, 9, 1, 0, 0}}, id)));
+        QTRY_COMPARE_WITH_TIMEOUT(link.detectionLogTotal(), quint64(5), 3000);
+        for (size_t i = 0; i < 5; ++i) QCOMPARE(link.detectionLog()[i].frameId, quint32(i + 1));
+        QVERIFY(link.detectionLog().back().wallMs > 0 && link.detectionLog().back().monoMs > 0);
+
+        // A stale state clears the boxes, not the log
+        QTRY_VERIFY_WITH_TIMEOUT(link.detections().boxes.empty(), int(kDetectionStaleMs) + 1000);
+        QCOMPARE(link.detectionLog().size(), size_t(5));
+
+        // Batches below the pending limit, one per poll, past the log's limit
+        const size_t target = PayloadLink::kDetectionLogSize + 10;
+        for (size_t id = 6; id <= target; ) {
+            for (int k = 0; k < 40 && id <= target; ++k, ++id) fake.send(frameOf(packetOf({}, uint32_t(id))));
+            QTest::qWait(120);
+        }
+        QTRY_COMPARE_WITH_TIMEOUT(link.detectionLogTotal(), quint64(target), 3000);
+        QCOMPARE(link.detectionLog().size(), PayloadLink::kDetectionLogSize);
+        QCOMPARE(link.detectionLog().back().frameId, quint32(target));
+        QCOMPARE(link.detectionLog().front().frameId, quint32(11));
+
+        link.disconnectLink();
+        QTRY_COMPARE_WITH_TIMEOUT(link.state(), LinkState::Disconnected, 3000);
+        QCOMPARE(link.detectionLogTotal(), quint64(target));  // still readable after a disconnect
+        FakePayload fake2;
+        link.connectTo(QStringLiteral("127.0.0.1"), fake2.port);
+        QCOMPARE(link.detectionLogTotal(), quint64(0));       // a new connection starts clean
+        QVERIFY(link.detectionLog().empty());
+        QTRY_COMPARE_WITH_TIMEOUT(link.state(), LinkState::SocketOpen, 5000);
+    }
+
     void states()
     {
         using S = DetectionState;

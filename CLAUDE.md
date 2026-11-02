@@ -38,7 +38,7 @@ results, acceptance checklist, limitations). For setup on native Ubuntu, see
 ## Next steps
 
 1. Native build: `scripts/build.sh` should report 10/10 tests passing. If it fails with a `CMakeCache.txt` path error, the
-   repository moved: delete `build/`.
+   repository moved: run `cmake --fresh -S . -B build`. Build into `build/` so the user's binary has the work.
 2. On native Linux, verify RTSP over UDP and live network capture (both impossible under WSL2).
    `ffmpeg -rtsp_transport udp` got only 3 frames on 2026-10-23 (TCP fine). The laptop then had two
    addresses in 192.168.55.0/24 (`.3` and `.100`), which may matter.

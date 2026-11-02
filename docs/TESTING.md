@@ -15,8 +15,8 @@ cmake -S . -B build && cmake --build build -j2 && ctest --test-dir build --outpu
 | `mavlink_frame`, `link_logic` | Framing, CRC, link states |
 | `sdk_transport`, `payload_link` | Real SDK on loopback, connect and disconnect |
 | `payload_control` | Exact outgoing frames (including every `MAV_CMD_USER_4` parameter of the calibration commands), ACK correlation, telemetry, stream and FOV requests, gimbal settings, profiles |
-| `detection` | Packet validation, states, overlay pixels at hand-computed positions through resizes, selection, the SDK callback path, tracker encoding |
-| `main_window` | Offscreen GUI against a fake payload, including the detection workflow, fresh-only stream and FOV display, per-model controls, and gimbal setting confirmation |
+| `detection` | Packet validation, states, overlay pixels at hand-computed positions through resizes, selection, the SDK callback path, packet log limits, class guesses, tracker encoding |
+| `main_window` | Offscreen GUI against a fake payload, including the detection workflow and data window, fresh-only stream and FOV display, per-model controls, and gimbal setting confirmation |
 | `inspector`, `pcap`, `video` | Inspector, capture files, local RTSP server |
 
 `test_main_window` also writes screenshots when `SCREENSHOT_DIR` is set.
@@ -30,7 +30,8 @@ only when you have approved that step. See `docs/DEVELOPMENT_PROGRESS.md` for wh
 
 | Symptom | Cause and fix |
 |---|---|
-| `CMakeCache.txt directory ... is different` | The repository moved after `build/` was created. Delete `build/` and run again |
+| `CMakeCache.txt directory ... is different` | The repository moved after `build/` was created. Run `cmake --fresh -S . -B build`, then build again |
+| New features do not appear in the app | The binary is older than the source. Run `cmake --build build -j2` and restart the app. Check the date with `ls -l build/mavlink_debug_app` |
 | A compile is killed, or the machine freezes | Too many parallel jobs: `JOBS=2 scripts/build.sh` |
 | Detection stays on **Waiting**, then **No response** | The payload sent no packets. Check its ACKs in Analyze › Commands. An ACK timeout is not a refusal, and the firmware may not support detection |
 | Detection shows **Refused** | The payload rejected the mode or the stream. See the result column in Analyze › Commands |

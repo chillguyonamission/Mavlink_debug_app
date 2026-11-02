@@ -9,6 +9,7 @@
 #include <QRectF>
 #include <QString>
 
+#include <deque>
 #include <vector>
 
 struct DetectionBox {
@@ -22,6 +23,7 @@ struct DetectionFrame {
     quint32 frameId = 0;
     std::vector<DetectionBox> boxes;
     int rejected = 0;  // boxes the packet claimed that have no usable geometry
+    qint64 monoMs = 0, wallMs = 0;  // when it was received: the packet itself has no timestamp
 };
 
 // MAVLink 2 trims trailing zero bytes and the decoder zero-fills them again, so a short frame is normal and the wire
@@ -52,3 +54,8 @@ QRectF detectionRectInPicture(const QRect &box, const QRectF &picture);
 // The smallest box under pos that has a track ID, so it can be followed across packets. nullptr = none.
 const DetectionBox *detectionAt(const std::vector<DetectionBox> &boxes, QPointF pos, const QRectF &picture);
 QString detectionLabel(const DetectionBox &b);  // "#7 class 3 87%": class numbers only, names depend on the model
+long detectionConfidencePercent(const DetectionBox &b);
+// "3 (motorcycle?)": a guess from the COCO table in the SDK's example for its EO model, for the data window. Other models
+// number classes differently, so an ID outside the table is only a number.
+QString detectionClassGuess(int classId);
+double detectionRate(const std::deque<DetectionFrame> &log, qint64 nowMs);  // packets per second, over the last 2 s

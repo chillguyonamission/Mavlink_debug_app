@@ -14,7 +14,7 @@ The module list is in `README.md` under *Layout*. This page covers how data move
 | Thread | Runs | Rule |
 |---|---|---|
 | SDK I/O threads | `regTransportObserver()` callback | Copies the datagram into a bounded queue under `m_mutex` |
-| SDK receive thread | `regPayloadDetectionChanged()` callback | Overwrites one latest-packet slot under `m_mutex` |
+| SDK receive thread | `regPayloadDetectionChanged()` callback | Copies the packet into a queue of at most 64 under `m_mutex`; drops the oldest when full |
 | GUI thread | `PayloadLink::poll()` every 100 ms | Takes both, parses, updates state, emits signals |
 | GStreamer streaming thread | `VideoPlayer::onSample()` | Copies the newest frame; the GUI takes the latest |
 
@@ -26,7 +26,7 @@ No SDK or GStreamer thread touches a widget.
 payload ─V2_EXTENSION(248)─▶ SDK _handle_msg_v2_extension()      type, magic, version, num_boxes clamp
                               │ regPayloadDetectionChanged()     SDK receive thread
                               ▼
-                         PayloadLink::m_detPacket                newest only, under m_mutex
+                         PayloadLink::m_detPackets               bounded queue, under m_mutex
                               │ poll(), 100 ms, GUI thread
                               ▼
                          parseDetectionPacket()                  geometry validation
@@ -35,7 +35,13 @@ payload ─V2_EXTENSION(248)─▶ SDK _handle_msg_v2_extension()      type, mag
                               ▼
                          VideoView::setDetections()              painted through pictureRect()
                          CameraPage                              status and selection text, 4 Hz
+                         DetectionDataPage                       the pop-up, reads detections() and detectionLog()
 ```
+
+`PayloadLink` keeps the last 1000 parsed packets in `detectionLog()` for the connection, past stale data and past
+`detectionStop()`. The pop-up is created on first use and works only while visible, adding what it has not shown yet,
+so closing or pausing it loses nothing within those 1000. The queue is not newest-only because two packets between polls
+would otherwise leave a gap in the log.
 
 Detection, bounding-box metadata and tracking stay separate:
 

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iterator>
 
 DetectionFrame parseDetectionPacket(const det_packet_t &pkt)
 {
@@ -64,6 +65,33 @@ const DetectionBox *detectionAt(const std::vector<DetectionBox> &boxes, QPointF 
 
 QString detectionLabel(const DetectionBox &b)
 {
-    const QString s = QStringLiteral("class %1 %2%").arg(b.classId).arg(std::lround(b.confidence * 100.0 / 255));
+    const QString s = QStringLiteral("class %1 %2%").arg(b.classId).arg(detectionConfidencePercent(b));
     return b.trackId ? QStringLiteral("#%1 ").arg(b.trackId) + s : s;
+}
+
+long detectionConfidencePercent(const DetectionBox &b) { return std::lround(b.confidence * 100.0 / 255); }
+
+QString detectionClassGuess(int classId)
+{
+    // COCO_LABELS in the SDK's examples/payload_get_bounding_box_detection.cpp
+    static const char *const coco[] = {
+        "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat", "traffic light",
+        "fire hydrant", "stop sign", "parking meter", "bench", "bird", "cat", "dog", "horse", "sheep", "cow",
+        "elephant", "bear", "zebra", "giraffe", "backpack", "umbrella", "handbag", "tie", "suitcase", "frisbee",
+        "skis", "snowboard", "sports ball", "kite", "baseball bat", "baseball glove", "skateboard", "surfboard",
+        "tennis racket", "bottle", "wine glass", "cup", "fork", "knife", "spoon", "bowl", "banana", "apple",
+        "sandwich", "orange", "broccoli", "carrot", "hot dog", "pizza", "donut", "cake", "chair", "couch",
+        "potted plant", "bed", "dining table", "toilet", "tv", "laptop", "mouse", "remote", "keyboard", "cell phone",
+        "microwave", "oven", "toaster", "sink", "refrigerator", "book", "clock", "vase", "scissors", "teddy bear",
+        "hair drier", "toothbrush"};
+    if (classId < 0 || classId >= int(std::size(coco))) return QString::number(classId);
+    return QStringLiteral("%1 (%2?)").arg(classId).arg(QLatin1String(coco[classId]));
+}
+
+double detectionRate(const std::deque<DetectionFrame> &log, qint64 nowMs)
+{
+    const qint64 windowMs = 2000;
+    int n = 0;
+    for (auto it = log.rbegin(); it != log.rend() && nowMs - it->monoMs < windowMs; ++it) ++n;
+    return n * 1000.0 / windowMs;
 }

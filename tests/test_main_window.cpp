@@ -18,6 +18,7 @@
 #include <QTimer>
 #include <QLabel>
 #include <QLineEdit>
+#include <QListWidget>
 #include <QSignalSpy>
 #include <QSlider>
 #include <QPushButton>
@@ -290,6 +291,126 @@ private slots:
         connectBtn->click();
         QTRY_COMPARE_WITH_TIMEOUT(w.link()->state(), LinkState::Disconnected, 3000);
         QVERIFY(ip->isEnabled());
+    }
+
+    // The pop-up: opens from a button, sends nothing, follows the packets, pauses, and drops boxes with stale data
+    void detectionDataWindow()
+    {
+        FakePayload fake;
+        MainWindow w;
+        w.resize(1440, 900);
+        w.show();
+        w.findChild<QLineEdit *>(QStringLiteral("ipEdit"))->setText(QStringLiteral("127.0.0.1"));
+        w.findChild<QSpinBox *>(QStringLiteral("portSpin"))->setValue(fake.port);
+        auto *connectBtn = w.findChild<QPushButton *>(QStringLiteral("connectButton"));
+        connectBtn->click();
+        QTRY_VERIFY_WITH_TIMEOUT(isOpen(w.link()->state()), 5000);
+        QVERIFY(fake.learnAppEndpoint());
+        QVERIFY(!w.findChild<QDialog *>(QStringLiteral("detectionDataWindow")));  // not until asked for
+
+        QPushButton *open = nullptr;
+        for (QPushButton *b : w.findChild<CameraPage *>()->findChildren<QPushButton *>())
+            if (b->text() == QStringLiteral("Detection data…")) open = b;
+        QVERIFY(open);
+        QTest::qWait(300);
+        const size_t commands = w.link()->tracker().commands().size();
+        fake.received();
+        open->click();
+        auto *dialog = w.findChild<QDialog *>(QStringLiteral("detectionDataWindow"));
+        QVERIFY(dialog && dialog->isVisible() && !dialog->isModal());
+        auto *page = dialog->findChild<DetectionDataPage *>();
+        auto *table = page->findChild<QTableWidget *>();
+        auto *log = page->findChild<QListWidget *>();
+        QVERIFY(page && table && log);
+        QPushButton *pause = nullptr;
+        for (QPushButton *b : page->findChildren<QPushButton *>()) if (b->text() == QStringLiteral("Pause")) pause = b;
+        QVERIFY(pause);
+        auto label = [&](const QString &text) {
+            for (QLabel *l : page->findChildren<QLabel *>()) if (l->text().contains(text)) return l;
+            return static_cast<QLabel *>(nullptr);
+        };
+        QTRY_VERIFY_WITH_TIMEOUT(label(QStringLiteral("No packets received")), 3000);
+
+        auto send = [&](uint32_t id, std::initializer_list<det_box_t> boxes) {
+            det_packet_t p{};
+            p.magic = DET_PACKET_MAGIC;
+            p.version = DET_PACKET_VERSION;
+            p.frame_id = id;
+            for (const det_box_t &b : boxes) p.boxes[p.num_boxes++] = b;
+            uint8_t payload[MAVLINK_MSG_V2_EXTENSION_FIELD_PAYLOAD_LEN] = {0};
+            memcpy(payload, &p, sizeof p);
+            mavlink_message_t m;
+            mavlink_msg_v2_extension_pack_chan(1, MAV_COMP_ID_USER2, MAVLINK_COMM_0, &m, 0, 1, 193, DET_MSG_TYPE, payload);
+            fake.send(m);
+        };
+        send(100, {{480, 270, 200, 100, 7, 3, 200}, {0, 0, 0, 0, 8, 0, 0}});  // the second has no size
+        QTRY_COMPARE_WITH_TIMEOUT(table->rowCount(), 1, 3000);
+        const QStringList row{QStringLiteral("#7"), QStringLiteral("3 (motorcycle?)"), QStringLiteral("78%"), QStringLiteral("480"),
+                              QStringLiteral("270"), QStringLiteral("200"), QStringLiteral("100"), QStringLiteral("580.0, 320.0")};
+        for (int col = 0; col < row.size(); ++col) QCOMPARE(table->item(0, col)->text(), row[col]);
+        QVERIFY(label(QStringLiteral("Frame 100 · 1 valid / 2 claimed")));
+        QVERIFY(label(QStringLiteral("pkt/s")));
+        QVERIFY(label(QStringLiteral("Active")));
+        QVERIFY(log->item(0)->text().endsWith(QStringLiteral("  100  1 box, 1 invalid")));
+
+        send(101, {{1, 2, 3, 4, 0, 200, 255}});  // no track yet; a class outside the table
+        QTRY_COMPARE_WITH_TIMEOUT(log->count(), 2, 3000);
+        QVERIFY(log->item(0)->text().endsWith(QStringLiteral("  101  1 box")));  // newest first
+        QVERIFY(log->item(1)->text().endsWith(QStringLiteral("  100  1 box, 1 invalid")));
+        QCOMPARE(table->item(0, 0)->text(), QStringLiteral("—"));
+        QCOMPARE(table->item(0, 1)->text(), QStringLiteral("200"));
+        if (const QByteArray dir = qgetenv("SCREENSHOT_DIR"); !dir.isEmpty()) dialog->grab().save(QString::fromLocal8Bit(dir) + QStringLiteral("/detection_data.png"));
+
+        // Pause: table and log hold still while packets keep arriving, and catch up on Resume
+        pause->click();
+        QCOMPARE(pause->text(), QStringLiteral("Resume"));
+        send(102, {{10, 10, 10, 10, 1, 0, 9}, {30, 30, 10, 10, 2, 0, 9}});
+        QTRY_COMPARE_WITH_TIMEOUT(w.link()->detections().frameId, quint32(102), 3000);
+        QTest::qWait(300);
+        QCOMPARE(table->rowCount(), 1);
+        QCOMPARE(table->item(0, 3)->text(), QStringLiteral("1"));
+        QCOMPARE(log->count(), 2);
+        QVERIFY(label(QStringLiteral("Paused at frame 101 · 1 valid / 1 claimed")));
+        QVERIFY(label(QStringLiteral("1 newer packets")));
+        pause->click();
+        QCOMPARE(pause->text(), QStringLiteral("Pause"));
+        QCOMPARE(log->count(), 3);
+        QVERIFY(log->item(0)->text().endsWith(QStringLiteral("  102  2 boxes")));
+        QCOMPARE(table->rowCount(), 2);
+
+        // Stale: the boxes go, as on the video. The log stays.
+        QTRY_COMPARE_WITH_TIMEOUT(table->rowCount(), 0, int(kDetectionStaleMs) + 1000);
+        QTRY_VERIFY_WITH_TIMEOUT(label(QStringLiteral("Last frame 102")), 3000);
+        QCOMPARE(log->count(), 3);
+
+        // Reading the data sent nothing
+        QCOMPARE(w.link()->tracker().commands().size(), commands);
+        for (const MavFrame &f : fake.received()) {
+            const bool tracking = f.msgid == MAVLINK_MSG_ID_COMMAND_LONG && mavlink_msg_command_long_get_command(&f.msg) == MAV_CMD_USER_4;
+            QVERIFY(!tracking && f.msgid != MAVLINK_MSG_ID_GIMBAL_DEVICE_SET_ATTITUDE && f.msgid != MAVLINK_MSG_ID_PARAM_EXT_SET);
+        }
+
+        // A closed window catches up when reopened
+        dialog->close();
+        send(103, {});
+        QTRY_COMPARE_WITH_TIMEOUT(w.link()->detectionLogTotal(), quint64(4), 3000);
+        QTest::qWait(300);
+        QCOMPARE(log->count(), 3);
+        open->click();
+        QTRY_COMPARE_WITH_TIMEOUT(log->count(), 4, 3000);
+
+        // A new connection starts a clean log, even while paused
+        pause->click();
+        connectBtn->click();
+        QTRY_COMPARE_WITH_TIMEOUT(w.link()->state(), LinkState::Disconnected, 3000);
+        QCOMPARE(log->count(), 4);
+        FakePayload fake2;
+        w.findChild<QSpinBox *>(QStringLiteral("portSpin"))->setValue(fake2.port);
+        connectBtn->click();
+        QTRY_VERIFY_WITH_TIMEOUT(isOpen(w.link()->state()), 5000);
+        QTRY_COMPARE_WITH_TIMEOUT(log->count(), 0, 3000);
+        connectBtn->click();
+        QTRY_COMPARE_WITH_TIMEOUT(w.link()->state(), LinkState::Disconnected, 3000);
     }
 
     // Nothing is written without the operator's yes, and only the row they chose, even when rows move
