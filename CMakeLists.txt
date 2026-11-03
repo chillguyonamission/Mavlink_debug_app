@@ -41,7 +41,7 @@ target_compile_options(mavcore PRIVATE -Wall -Wextra)
 add_library(appcore STATIC
     src/link_health.cpp src/payload_link.cpp src/frame_model.cpp src/frame_filter.cpp
     src/frame_text.cpp src/frame_writer.cpp src/flow_stats.cpp src/mavlink_dict.cpp
-    src/command_tracker.cpp src/telemetry.cpp src/detection.cpp src/payload_profile_vio.cpp src/payload_profile_zio.cpp src/payload_profile_mb1.cpp src/payload_profile_orusl.cpp src/profiles.cpp src/pcap_capture.cpp)
+    src/command_tracker.cpp src/telemetry.cpp src/detection.cpp src/misb0601.cpp src/metadata_model.cpp src/payload_profile_vio.cpp src/payload_profile_zio.cpp src/payload_profile_mb1.cpp src/payload_profile_orusl.cpp src/profiles.cpp src/pcap_capture.cpp)
 target_include_directories(appcore PUBLIC src ${SDK_DIR}/libs)  # libs: detection_packet.h, which has no other SDK dependency
 target_link_libraries(appcore PUBLIC Qt6::Gui mavcore PkgConfig::PCAP PRIVATE PayloadSDK)
 target_compile_options(appcore PRIVATE -Wall -Wextra)
@@ -51,7 +51,7 @@ target_compile_definitions(appcore PRIVATE
 
 # --- Widgets and the GUI application ---
 add_library(appgui STATIC src/theme.cpp src/main_window.cpp src/inspector_widget.cpp src/stats_widget.cpp src/payload_pages.cpp
-    src/video_player.cpp src/video_page.cpp src/splash.cpp)
+    src/video_player.cpp src/video_page.cpp src/klv_receiver.cpp src/klv_page.cpp src/splash.cpp)
 target_link_libraries(appgui PUBLIC Qt6::Widgets appcore PRIVATE PkgConfig::GSTVIDEO)
 target_compile_options(appgui PRIVATE -Wall -Wextra)
 
@@ -77,7 +77,12 @@ if(GSTRTSPSERVER_FOUND)
     set_tests_properties(video PROPERTIES TIMEOUT 60 ENVIRONMENT QT_QPA_PLATFORM=offscreen)
 endif()
 
-foreach(t link_logic payload_link inspector payload_control pcap main_window detection)
+add_executable(test_klv_stream tests/test_klv_stream.cpp)
+target_link_libraries(test_klv_stream PRIVATE Qt6::Test appgui PkgConfig::GSTVIDEO)
+add_test(NAME klv_stream COMMAND test_klv_stream)
+set_tests_properties(klv_stream PROPERTIES TIMEOUT 300 ENVIRONMENT QT_QPA_PLATFORM=offscreen)
+
+foreach(t link_logic payload_link inspector payload_control pcap main_window detection misb0601 metadata_model)
     add_executable(test_${t} tests/test_${t}.cpp)
     target_link_libraries(test_${t} PRIVATE Qt6::Test appgui)
     add_test(NAME ${t} COMMAND test_${t})

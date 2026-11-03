@@ -38,9 +38,12 @@ results, acceptance checklist, limitations). For setup on native Ubuntu, see
 - 2026-11-02, later: audited the payload profiles against the SDK. Four targets, four profiles, none missing; Lynx and GHadron
   use MB1. Coverage matrix in `docs/SDK_FEATURE_MATRIX.md`. **ZIO, MB1 and OrusL still never ran on hardware.**
 
+- 2026-11-03: RTP/TS video + KLV integrated from `Gremsy_KLV_streamer` (`docs/KLV_STREAM.md`). **Tested only against a synthetic stream;**
+  no payload was reachable. Open hardware checks are in `docs/DEVELOPMENT_PROGRESS.md`.
+
 ## Next steps
 
-1. Native build: `scripts/build.sh` should report 10/10 tests passing. If it fails with a `CMakeCache.txt` path error, the
+1. Native build: `scripts/build.sh` should report 13/13 tests passing. If it fails with a `CMakeCache.txt` path error, the
    repository moved: run `cmake --fresh -S . -B build`. Build into `build/` so the user's binary has the work.
 2. On native Linux, verify RTSP over UDP and live network capture (both impossible under WSL2).
    `ffmpeg -rtsp_transport udp` got only 3 frames on 2026-10-23 (TCP fine). The laptop then had two
@@ -123,5 +126,8 @@ results, acceptance checklist, limitations). For setup on native Ubuntu, see
   loss.
 - **Video:** `rtsp://<IP>:8554/payload`, H.264 1280×720 at about 30 fps. Under WSL2 NAT only TCP
   works.
+- **KLV is unverified on hardware from this app.** The only topology evidence is one capture from ViO beta firmware (2026-10-29): video and
+  KLV in one TS on `239.255.0.1:8554`, with tags 1, 2, 16–21 and 65 only. Those are not universal settings.
+- **KLV and video are not synchronised.** The panel shows the latest stream metadata. Never present it as describing a frame.
 - **Build:** a full parallel build can exhaust memory. Use `JOBS=2 scripts/build.sh` if the machine
   freezes or a compile is killed.

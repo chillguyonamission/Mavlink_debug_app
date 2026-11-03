@@ -8,6 +8,9 @@ The module list is in `README.md` under *Layout*. This page covers how data move
   SDK's header. All commands use the SDK's own UDP transport; the app opens no second command socket.
 - `pcap_capture` is a separate observer. Its data never affects link health or command tracking.
 - `VideoPlayer` is a separate RTSP pipeline, independent of the MAVLink link.
+- `KlvReceiver` is a separate RTP/MPEG-TS pipeline. It opens its own UDP socket for the stream and knows nothing of the SDK,
+  `PayloadLink` or MAVLink. They share no lock, timer or queue.
+- `VideoPage` owns `VideoPlayer`, `KlvReceiver` and `MetadataModel`, and starts only the selected source.
 
 ## Threads
 
@@ -17,6 +20,8 @@ The module list is in `README.md` under *Layout*. This page covers how data move
 | SDK receive thread | `regPayloadDetectionChanged()` callback | Copies the packet into a queue of at most 64 under `m_mutex`; drops the oldest when full |
 | GUI thread | `PayloadLink::poll()` every 100 ms | Takes both, parses, updates state, emits signals |
 | GStreamer streaming thread | `VideoPlayer::onSample()` | Copies the newest frame; the GUI takes the latest |
+| GStreamer streaming threads | `KlvReceiver` probes and appsink callbacks | Count; copy the newest frame; copy KLV into a queue of at most 64, dropping the oldest |
+| GUI thread | `KlvReceiver::drainKlv()`, `MetadataModel` | Takes the KLV queue, parses it, and updates the model. Model and widgets are touched only here |
 
 No SDK or GStreamer thread touches a widget.
 
@@ -57,6 +62,38 @@ the boxes. Boxes are per-axis scaled, as the SDK example scales them.
 Video and metadata are not synchronised. The packet has a frame counter of its own and no timestamp, so a box can
 lag the picture by the network and decode delay.
 
+## RTP/TS and KLV path
+
+```
+udpsrc ─▶ rtpmp2tdepay ─▶ tsdemux ─ pad-added, by caps
+   │ count        │ count per PID  ├ video/x-h264 ─▶ queue (leaky) ─▶ h264parse ─▶ avdec_h264 ─▶ videoconvert ─▶ appsink (1, drop)
+                                   │                                                                        │ newest QImage, under m_mutex
+                                   │                                                                        ▼ frameReady(), coalesced
+                                   │                                                                   VideoView::setImage()
+                                   ├ meta/x-klv ──▶ queue (leaky, 64) ─▶ appsink (64, drop)
+                                   │                                     │ enqueueKlv(): 64 packets of at most 64 KiB, oldest dropped and counted
+                                   │                                     ▼ drainKlv() on the GUI thread, klvReceived()
+                                   │                                MetadataModel::ingestNow()  ─ 10 Hz changed() ─▶ KlvPanel
+                                   │                                                                4 Hz, read ─────▶ KlvPage
+                                   └ anything else ─▶ fakesink (listed in Analyze › KLV)
+```
+
+Parsing runs on the GUI thread because a packet is small. The size and queue limits are what keep it cheap: a batch cannot exceed
+64 packets of 64 KiB each.
+
+**States.** `updateState()` works out Waiting, Receiving, Decoding, NoKlvPad and KlvOnly from the last second's counters and the
+pads present. Error is set on a bus error or a failed start, and Failed when the pipeline cannot run.
+
+**Restarts.** A bus error schedules one restart after 2 s. Five in a row with no UDP traffic gives up as Failed, and only the next
+Start retries. `stop()` cancels a pending restart, then joins the streaming threads with `GST_STATE_NULL`, and only then clears the
+state the callbacks use. Work a stopped pipeline left queued carries an old generation number and is ignored.
+
+**Layout changes.** When `tsdemux` removes a pad, the whole pipeline is rebuilt. Rerouting a live demuxer is not safe here: a
+replacement pad can arrive before the old one leaves, with the same name.
+
+**Not synchronised.** The model records local arrival time, and KLV buffers are handed over without their PTS. Nothing relates a
+packet to a frame, so the panel says *latest stream metadata* and does not imply otherwise.
+
 ## Stream and FOV path
 
 The app registers no SDK stream or status callback for these. `poll()` adds every received frame to `TelemetryStore`,
@@ -95,6 +132,11 @@ Measured on 2026-11-02 on this Intel Meteor Lake laptop, release build, with rea
 | Command history | 500 | |
 | Detection log | 1000 packets | |
 | Datagrams queued from SDK threads | 20,000, then dropped and counted | |
+| RTP/TS frames kept | 1, the newest; replaced ones counted as superseded | |
+| KLV queue to the GUI thread | 64 packets of 64 KiB, then dropped and counted | |
+| KLV packet history | 30, plus 30 bad ones | |
+| KLV tags in the table | 256, then dropped and counted | |
+| RTP/TS log | 100 lines | |
 
 None of these is a bottleneck, so none was changed. Payload pages skip their 4 Hz refresh while hidden, including their
 requests to the payload.

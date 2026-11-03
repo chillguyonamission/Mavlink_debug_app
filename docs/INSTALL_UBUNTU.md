@@ -37,6 +37,19 @@ sudo apt install -y build-essential cmake pkg-config \
   server.
 - `gstreamer1.0-libav` provides the H.264 decoder the VIO stream needs.
 
+What each video source needs at run time. In RTP/TS mode the app names any missing element when you press Start:
+
+| Element | Package | Used by |
+|---|---|---|
+| `rtspsrc`, `udpsrc`, `rtpmp2tdepay` | `gstreamer1.0-plugins-good` | `rtspsrc`: RTSP. The others: RTP/TS |
+| `tsdemux`, `h264parse` | `gstreamer1.0-plugins-bad` | RTP/TS (and `h264parse` for RTSP) |
+| `avdec_h264` | `gstreamer1.0-libav` | RTP/TS always; RTSP unless `decodebin` finds another decoder |
+| `videoconvert`, `appsink`, `decodebin` | `gstreamer1.0-plugins-base` (comes with the others) | Both |
+
+The KLV test also uses `openh264enc` and `mpegtsmux` from `gstreamer1.0-plugins-bad`, and `rtpmp2tpay` from
+`gstreamer1.0-plugins-good`. Tested with Qt 6.4.2 and GStreamer 1.24.2 on Ubuntu 24.04. RTP/TS needs no package beyond this list,
+and no Qt module was added.
+
 ## 3. Clone, build, and run the tests
 
 ```bash

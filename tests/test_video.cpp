@@ -2,9 +2,11 @@
 // GLib/gio headers first: they use "signals" as an identifier, which Qt defines as a macro.
 #include <gst/rtsp-server/rtsp-server.h>
 
+#include "klv_receiver.h"
 #include "video_page.h"
 #include "video_player.h"
 
+#include <QComboBox>
 #include <QDir>
 #include <QLineEdit>
 #include <QPushButton>
@@ -124,6 +126,26 @@ private slots:
         QVERIFY(!url->isEnabled());
         page.findChild<QPushButton *>(QStringLiteral("videoStartStop"))->click();
         QCOMPARE(page.player()->state(), VideoPlayer::State::Stopped);
+    }
+
+    // RTSP remains the default source and runs alone: the KLV receiver stays stopped throughout.
+    void rtspSourceLeavesTheKlvReceiverStopped()
+    {
+        QStandardPaths::setTestModeEnabled(true);
+        QCoreApplication::setOrganizationName(QStringLiteral("GremsyTest"));
+        QSettings().remove(QStringLiteral("video"));
+        VideoPage page;
+        auto *source = page.findChild<QComboBox *>(QStringLiteral("videoSource"));
+        QCOMPARE(source->currentIndex(), 0);
+        page.findChild<QLineEdit *>(QStringLiteral("rtspUrl"))->setText(m_url);
+        page.findChild<QPushButton *>(QStringLiteral("videoStartStop"))->click();
+        QTRY_COMPARE_WITH_TIMEOUT(page.player()->state(), VideoPlayer::State::Playing, 10000);
+        QVERIFY(!source->isEnabled());
+        QVERIFY(!page.klvReceiver()->isRunning());
+        QCOMPARE(page.klvReceiver()->state(), KlvReceiver::State::Stopped);
+        page.findChild<QPushButton *>(QStringLiteral("videoStartStop"))->click();
+        QCOMPARE(page.player()->state(), VideoPlayer::State::Stopped);
+        QVERIFY(source->isEnabled());
     }
 
     // The main window moves the settings panel into its drawer, which is destroyed first: closing the app while

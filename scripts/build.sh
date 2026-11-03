@@ -26,7 +26,7 @@ if ((${#missing[@]})); then
     echo "         libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-libav" >&2
     exit 1
 fi
-for e in rtspsrc h264parse avdec_h264; do
+for e in rtspsrc udpsrc rtpmp2tdepay tsdemux h264parse avdec_h264 videoconvert appsink; do
     gst-inspect-1.0 "$e" >/dev/null 2>&1 || echo "warning: GStreamer element $e missing: live video will not play" >&2
 done
 

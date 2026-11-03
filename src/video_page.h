@@ -9,6 +9,10 @@
 
 #include <vector>
 
+class KlvPanel;
+class KlvReceiver;
+class KlvSettingsPanel;
+class MetadataModel;
 class QComboBox;
 class QLabel;
 class QLineEdit;
@@ -69,13 +73,23 @@ public:
     VideoPlayer *player() const { return m_player; }
     VideoView *view() const { return m_view; }
     QWidget *settingsPanel() const { return m_settings; }  // URL, transport, latency; may be moved elsewhere
+    QWidget *klvSettingsPanel() const;  // address, port, interface, RTP caps; may be moved elsewhere
+    KlvReceiver *klvReceiver() const { return m_klv; }
+    MetadataModel *klvModel() const { return m_klvModel; }
+    bool klvSelected() const;  // the RTP/TS source is selected, as opposed to RTSP
 
 private:
     void onStartStop();
     void onState();
     void refreshStatus();
+    void showKlvState();
 
     VideoPlayer *m_player;
+    KlvReceiver *m_klv;
+    MetadataModel *m_klvModel;
+    KlvPanel *m_klvPanel;
+    KlvSettingsPanel *m_klvSettings;
+    QComboBox *m_source;
     VideoView *m_view;
     QWidget *m_settings;
     QLineEdit *m_url;

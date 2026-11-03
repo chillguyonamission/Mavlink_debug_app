@@ -6,6 +6,8 @@
 #include "payload_link.h"
 #include "stats_widget.h"
 #include "ui_util.h"
+#include "klv_page.h"
+#include "klv_receiver.h"
 #include "video_page.h"
 #include "video_player.h"
 
@@ -242,6 +244,12 @@ MainWindow::MainWindow(QWidget *parent)
     videoTitle->setMinimumWidth(90);
     videoRow->addWidget(videoTitle);
     videoRow->addWidget(m_video->settingsPanel(), 1);  // moved out of the video panel to keep the picture large
+    auto *klvRow = new QHBoxLayout;
+    auto *klvTitle = new QLabel(QStringLiteral("RTP/TS + KLV"));
+    klvTitle->setObjectName(QStringLiteral("readoutCaption"));
+    klvTitle->setMinimumWidth(90);
+    klvRow->addWidget(klvTitle);
+    klvRow->addWidget(m_video->klvSettingsPanel(), 1);
 
     m_drawer = new QFrame;
     m_drawer->setObjectName(QStringLiteral("drawer"));
@@ -252,6 +260,7 @@ MainWindow::MainWindow(QWidget *parent)
     dl->addWidget(m_statsLabel);
     dl->addWidget(m_heartbeatLabel);
     dl->addLayout(videoRow);
+    dl->addLayout(klvRow);
 
     // --- Header ---
     auto *title = new QLabel(QStringLiteral("PAYLOAD CONTROL STATION"));
@@ -325,6 +334,7 @@ MainWindow::MainWindow(QWidget *parent)
     tabs->addTab(new TelemetryPage(m_link, dict), QStringLiteral("Telemetry"));
     tabs->addTab(new GimbalSettingsPage(m_link, dict), QStringLiteral("Gimbal settings"));
     tabs->addTab(m_statsPage, QStringLiteral("Statistics"));
+    tabs->addTab(new KlvPage(m_video->klvReceiver(), m_video->klvModel()), QStringLiteral("KLV"));
 
     m_views = new QStackedWidget;
     m_views->addWidget(m_hsplit);
@@ -397,6 +407,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_link, &PayloadLink::stateChanged, this, &MainWindow::onStateChanged);
     connect(m_link, &PayloadLink::framesCaptured, this, &MainWindow::onFrames);
     connect(m_video->player(), &VideoPlayer::stateChanged, this, &MainWindow::refreshOperator);
+    connect(m_video->klvReceiver(), &KlvReceiver::stateChanged, this, &MainWindow::refreshOperator);
     auto *tick = new QTimer(this);
     connect(tick, &QTimer::timeout, this, [this] { refreshStats(true); });
     tick->start(1000);
@@ -638,6 +649,23 @@ void MainWindow::refreshOperator()
     }
     m_videoLamp->setText(lampText(QStringLiteral("VIDEO"), vl, vd));
     m_videoLamp->setToolTip(v->state() == VideoPlayer::State::Error ? v->error() : QStringLiteral("RTSP video stream"));
+    if (m_video->klvSelected()) {
+        const KlvReceiver *k = m_video->klvReceiver();
+        Lamp kl = Lamp::Warn;
+        QString kd = QStringLiteral("waiting");
+        switch (k->state()) {
+        case KlvReceiver::State::Stopped: kl = Lamp::Off; kd = QStringLiteral("off"); break;
+        case KlvReceiver::State::Waiting: break;
+        case KlvReceiver::State::Receiving: kd = QStringLiteral("no frames"); break;
+        case KlvReceiver::State::KlvOnly: kd = QStringLiteral("no video"); break;
+        case KlvReceiver::State::Decoding:
+        case KlvReceiver::State::NoKlvPad: kl = Lamp::Ok; kd = QStringLiteral("%1 fps").arg(k->videoFps(), 0, 'f', 0); break;
+        case KlvReceiver::State::Error:
+        case KlvReceiver::State::Failed: kl = Lamp::Bad; kd = QStringLiteral("error"); break;
+        }
+        m_videoLamp->setText(lampText(QStringLiteral("VIDEO"), kl, kd));
+        m_videoLamp->setToolTip(QStringLiteral("RTP/TS video + KLV: %1").arg(KlvReceiver::stateText(k->state())));
+    }
 
     // Warnings: only conditions observed on the link
     const OperatorStatus o = m_link->operatorStatus();

@@ -1,5 +1,8 @@
 #include "video_page.h"
 
+#include "klv_page.h"
+#include "klv_receiver.h"
+#include "metadata_model.h"
 #include "theme.h"
 #include "ui_util.h"
 #include "video_player.h"
@@ -149,8 +152,15 @@ void VideoView::paintEvent(QPaintEvent *)
 }
 
 VideoPage::VideoPage(QWidget *parent)
-    : QWidget(parent), m_player(new VideoPlayer(this)), m_view(new VideoView), m_settings(new QWidget(this))
+    : QWidget(parent), m_player(new VideoPlayer(this)), m_klv(new KlvReceiver(this)), m_klvModel(new MetadataModel(this)),
+      m_klvPanel(new KlvPanel(m_klvModel)), m_klvSettings(new KlvSettingsPanel(m_klv, this)), m_view(new VideoView), m_settings(new QWidget(this))
 {
+    m_source = new QComboBox;
+    m_source->setObjectName(QStringLiteral("videoSource"));
+    m_source->addItem(QStringLiteral("RTSP video"));
+    m_source->addItem(QStringLiteral("RTP/TS video + KLV"));
+    m_source->setToolTip(QStringLiteral("One source at a time. RTSP plays the URL below. RTP/TS listens on the KLV stream's address and "
+                                        "shows its video and metadata. Which of these a payload sends depends on its firmware."));
     m_url = new QLineEdit;
     m_url->setObjectName(QStringLiteral("rtspUrl"));
     m_url->setToolTip(QStringLiteral("Built from the payload IP (Gremsy format rtsp://IP:8554/payload) until you edit it"));
@@ -170,6 +180,7 @@ VideoPage::VideoPage(QWidget *parent)
     m_status->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);  // long errors must not widen the panel
 
     QSettings s;
+    m_source->setCurrentIndex(qBound(0, s.value(QStringLiteral("video/source"), 0).toInt(), 1));
     m_transport->setCurrentIndex(qBound(0, s.value(QStringLiteral("video/transport"), 0).toInt(), 2));
     m_latency->setValue(qBound(0, s.value(QStringLiteral("video/latencyMs"), 100).toInt(), 2000));
     const QString savedUrl = s.value(QStringLiteral("video/url")).toString();
@@ -192,6 +203,7 @@ VideoPage::VideoPage(QWidget *parent)
     auto *head = new QHBoxLayout;
     head->setContentsMargins(0, 0, 8, 0);
     head->addWidget(title);
+    head->addWidget(m_source);
     head->addWidget(m_status, 1);
     head->addWidget(m_startStop);
     auto *l = new QVBoxLayout(this);
@@ -200,6 +212,7 @@ VideoPage::VideoPage(QWidget *parent)
     l->addLayout(head);
     l->addWidget(m_settings);
     l->addWidget(m_view, 1);
+    l->addWidget(m_klvPanel);
 
     // Saved on every change: the settings panel may be moved into another widget and destroyed before this page
     auto save = [this] {
@@ -220,6 +233,17 @@ VideoPage::VideoPage(QWidget *parent)
     connect(m_startStop, &QPushButton::clicked, this, &VideoPage::onStartStop);
     connect(m_player, &VideoPlayer::stateChanged, this, &VideoPage::onState);
     connect(m_player, &VideoPlayer::frameReady, this, [this] { m_view->setImage(m_player->latestFrame()); });
+    connect(m_source, &QComboBox::currentIndexChanged, this, [this](int i) {
+        QSettings().setValue(QStringLiteral("video/source"), i);
+        onState();
+    });
+    connect(m_klv, &KlvReceiver::stateChanged, this, &VideoPage::onState);
+    connect(m_klv, &KlvReceiver::statsChanged, this, &VideoPage::refreshStatus);
+    connect(m_klv, &KlvReceiver::frameReady, this, [this] {
+        if (const QImage frame = m_klv->frame(); !frame.isNull()) m_view->setImage(frame);
+    });
+    connect(m_klv, &KlvReceiver::klvReceived, m_klvModel, &MetadataModel::ingestNow);
+    connect(m_klv, &KlvReceiver::configChanged, m_klvModel, &MetadataModel::reset);  // another stream's values are not this one's
     auto *t = new QTimer(this);
     connect(t, &QTimer::timeout, this, &VideoPage::refreshStatus);
     t->start(1000);
@@ -228,6 +252,10 @@ VideoPage::VideoPage(QWidget *parent)
 
 VideoPage::~VideoPage() = default;
 
+QWidget *VideoPage::klvSettingsPanel() const { return m_klvSettings; }
+
+bool VideoPage::klvSelected() const { return m_source->currentIndex() == 1; }
+
 void VideoPage::setPayloadIp(const QString &ip)
 {
     if (!m_urlEdited) m_url->setText(VideoPlayer::defaultUrl(ip.trimmed()));
@@ -235,6 +263,15 @@ void VideoPage::setPayloadIp(const QString &ip)
 
 void VideoPage::onStartStop()
 {
+    if (klvSelected()) {
+        if (m_klv->isRunning()) {
+            m_klv->stop();
+        } else {
+            m_klvModel->reset();
+            m_klv->start();
+        }
+        return;
+    }
     const VideoPlayer::State st = m_player->state();
     if (st == VideoPlayer::State::Connecting || st == VideoPlayer::State::Playing) {
         m_player->stop();
@@ -246,19 +283,60 @@ void VideoPage::onStartStop()
 void VideoPage::onState()
 {
     const VideoPlayer::State st = m_player->state();
-    const bool running = st == VideoPlayer::State::Connecting || st == VideoPlayer::State::Playing;
+    const bool klv = klvSelected();
+    const bool running = klv ? m_klv->isRunning() : st == VideoPlayer::State::Connecting || st == VideoPlayer::State::Playing;
     m_startStop->setText(running ? QStringLiteral("Stop video") : QStringLiteral("Start video"));
-    m_url->setEnabled(!running);
-    m_transport->setEnabled(!running);
-    m_latency->setEnabled(!running);
+    m_source->setEnabled(!running);  // one source at a time: stop before switching
+    m_url->setEnabled(!running && !klv);
+    m_transport->setEnabled(!running && !klv);
+    m_latency->setEnabled(!running && !klv);
+    m_klvPanel->setVisible(klv);
+    if (klv) {
+        showKlvState();
+        refreshStatus();
+        return;
+    }
     if (st == VideoPlayer::State::Connecting) m_view->clear(QStringLiteral("Connecting to %1 …").arg(m_url->text()));
     if (st == VideoPlayer::State::Stopped) m_view->clear(QStringLiteral("Video stopped"));
     if (st == VideoPlayer::State::Error) m_view->clear(QStringLiteral("No video: %1").arg(m_player->error()));
     refreshStatus();
 }
 
+// Only on a state change, and never for the states with a picture: otherwise a stale image would stay up looking live.
+void VideoPage::showKlvState()
+{
+    switch (m_klv->state()) {
+    case KlvReceiver::State::Stopped: m_view->clear(QStringLiteral("Video stopped")); break;
+    case KlvReceiver::State::Waiting: m_view->clear(QStringLiteral("Waiting for RTP/TS on %1 …").arg(m_klv->endpoint())); break;
+    case KlvReceiver::State::Receiving: m_view->clear(QStringLiteral("Receiving RTP/TS, no decoded frames yet")); break;
+    case KlvReceiver::State::KlvOnly: m_view->clear(QStringLiteral("This stream carries KLV but no video")); break;
+    case KlvReceiver::State::Error:
+    case KlvReceiver::State::Failed: m_view->clear(QStringLiteral("No video: %1").arg(m_klv->lastError())); break;
+    case KlvReceiver::State::Decoding:
+    case KlvReceiver::State::NoKlvPad: break;
+    }
+}
+
 void VideoPage::refreshStatus()
 {
+    if (klvSelected()) {
+        const KlvReceiver::State st = m_klv->state();
+        // In order of need: the label clips at its right edge, and the tooltip has the rest
+        QString text = KlvReceiver::stateText(st);
+        if (st == KlvReceiver::State::Error || st == KlvReceiver::State::Failed)
+            text += QStringLiteral(" · ") + m_klv->lastError();
+        if (const QImage img = m_klv->frame(); !img.isNull())
+            text += QStringLiteral(" · %1×%2 · %3 fps").arg(img.width()).arg(img.height()).arg(m_klv->videoFps(), 0, 'f', 1);
+        if (st != KlvReceiver::State::Stopped && st != KlvReceiver::State::Failed)
+            text += QStringLiteral(" · %1 pkt/s, %2 kbit/s").arg(m_klv->udpRate(), 0, 'f', 0).arg(m_klv->udpKbps(), 0, 'f', 0);
+        if (st != KlvReceiver::State::Stopped)
+            text += QStringLiteral(" · %1").arg(m_klv->endpoint());
+        const bool bad = st == KlvReceiver::State::Error || st == KlvReceiver::State::Failed;
+        const bool waiting = st == KlvReceiver::State::Waiting || st == KlvReceiver::State::Receiving || st == KlvReceiver::State::KlvOnly;
+        m_status->setText(colored(text.toHtmlEscaped(), bad ? Theme::Bad : waiting ? Theme::Warn : Theme::Dim));
+        m_status->setToolTip(m_status->text());
+        return;
+    }
     switch (m_player->state()) {
     case VideoPlayer::State::Stopped:
         m_status->setText(colored(QStringLiteral("Stopped (independent of the MAVLink link)"), Theme::Dim));
