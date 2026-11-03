@@ -12,6 +12,9 @@ beside the MAVLink link and shares nothing with it: a stream failure does not to
 | Release firmware sends it | **Unknown** |
 | A payload sends RTSP and RTP/TS at the same time | **Unknown.** That is why KLV runs only as this source, not alongside RTSP |
 
+**Memory is not stable in this mode.** `avdec_h264` grows by about 20 MB per hour while decoding, with or without this app. Descriptors and
+threads are flat. See *Known resource issues* in `docs/TESTING.md`.
+
 ## Settings
 
 In **SETTINGS › RTP/TS + KLV**. **Apply** checks them, saves them, and restarts the stream if it is running. They are stored with

@@ -71,6 +71,7 @@ No payload was reachable during this work (2026-11-03), so RTP/TS has run only a
 | Tag set | Analyze › KLV, with and without GPS | Do position and platform tags appear once the payload has GPS? |
 | Tag 2 | Duplicates counter | Does tag 2 advance on every packet on real firmware? If not, metadata would read as stale |
 | Soak on target | `test_klv_stream soak` covers loopback only | Memory, descriptors and threads on the target machine with the real 720p stream |
+| `openh264dec` on the real stream | Plain `gst-launch`, read-only | Does it decode the payload's H.264? It would avoid the `avdec_h264` memory growth |
 
 ## Test log
 
@@ -100,4 +101,4 @@ Run on 2026-11-03, native Ubuntu, for the KLV integration. No payload was reacha
 | AddressSanitizer and UBSan on `klv_stream`, `metadata_model`, `misb0601` | Passed, no reports. Leak check on `klv_stream` only, with leaks inside Qt, GLib and GStreamer suppressed: none |
 | ThreadSanitizer on `klv_stream` | All test functions passed, and the binary exits 66 because reports exist. None has both accesses in app source. GStreamer and GLib are not instrumented, so those reports were not individually proven false |
 | 50 start/stop cycles | No thread or non-GPU descriptor growth |
-| 60-minute soak, synthetic stream | **Not finished when this was committed.** At 34 minutes: descriptors and threads flat, no KLV drops, memory 104 MB to 115 MB, which is not yet shown to be stable |
+| 60-minute soak, synthetic 320×240 stream over loopback | Decoding throughout, 0 KLV drops, 0 malformed, descriptors and threads flat. **Memory not stable:** 104 MB to 124 MB, about 20 MB/h, from `avdec_h264`. See *Known resource issues* in `docs/TESTING.md` |

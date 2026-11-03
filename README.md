@@ -592,7 +592,8 @@ loopback fake payload and checks that `sdkQuit()` returns in under 2 s (measured
   settings, standby, restart, SpotAE and GPS forwarding are not built. See `docs/DEVELOPMENT_PROGRESS.md`.
 - **RTP/TS and KLV:** run only against a synthetic stream from this app. Topology, firmware support and tag set are from one ViO
   beta capture. KLV is not synchronised to video, has no platform position or target coordinates, cannot run alongside RTSP video,
-  and bare KLV over UDP is not supported. RTP/TS always decodes in software. See `docs/KLV_STREAM.md`.
+  and bare KLV over UDP is not supported. RTP/TS always decodes in software with `avdec_h264`, which grows by about 20 MB per hour on
+  the synthetic stream, without any app code involved. See `docs/KLV_STREAM.md`.
 - **Live network capture:** checked only for its error path here (no root under WSL). The decoding
   and file path are tested with `.pcap` files written by libpcap.
 - **Video:** there is no recording or snapshot from the app (use the payload's own recording).

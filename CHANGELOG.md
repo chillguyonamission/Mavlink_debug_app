@@ -10,7 +10,7 @@ Newest first. "Tested" means the hardware-free CTest suite unless a line says ha
 - **RTP/TS video + KLV:** a video source selector in Operate › LIVE VIDEO, alongside RTSP. Plays H.264 from an RTP/MPEG-TS stream and
   decodes MISB ST 0601 KLV from the same stream, with a compact panel under the video and a new Analyze › KLV tab. Decoder and
   model come from the KLV monitor project. Tested with a synthetic stream; not run on hardware. Metadata is the latest in the
-  stream and is not synchronised to frames. See `docs/KLV_STREAM.md`.
+  stream and is not synchronised to frames. Memory grows by about 20 MB per hour in this mode, from `avdec_h264`. See `docs/KLV_STREAM.md`.
 - **Object detection:** enable and disable from Operate › OBJECT DETECTION, status with seven states, boxes painted
   on the existing video view, click to select a box by track ID. Data comes from the SDK's
   `regPayloadDetectionChanged()` callback. Tested with a fake payload; not run on hardware.

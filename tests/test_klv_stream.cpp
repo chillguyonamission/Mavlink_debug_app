@@ -576,23 +576,47 @@ private slots:
     }
 
     // Not a check: KLV_SOAK_SECONDS=3600 runs the stream that long and prints memory, descriptors and threads each minute.
+    // KLV_SOAK_ROLE=send, receive or headless (no widgets), with KLV_SOAK_PORT, runs one side alone, to tell which side grows.
     void soak()
     {
         const int seconds = qEnvironmentVariableIntValue("KLV_SOAK_SECONDS");
         if (!seconds) QSKIP("set KLV_SOAK_SECONDS to run");
-        VideoPage page;
-        KlvPage detail(page.klvReceiver(), page.klvModel());
-        page.resize(800, 500);
-        page.show();
-        detail.show();
-        const int port = nextPort();
-        page.klvReceiver()->apply(loopback(port));
-        page.findChild<QComboBox *>(QStringLiteral("videoSource"))->setCurrentIndex(1);
-        page.findChild<QPushButton *>(QStringLiteral("videoStartStop"))->click();
-        Sender sender(port, Streams::VideoAndKlv);
+        const QByteArray role = qgetenv("KLV_SOAK_ROLE");
+        const int port = qEnvironmentVariableIntValue("KLV_SOAK_PORT") ? qEnvironmentVariableIntValue("KLV_SOAK_PORT") : nextPort();
+
+        std::unique_ptr<VideoPage> page;
+        std::unique_ptr<KlvPage> detail;
+        std::unique_ptr<KlvReceiver> headless;
+        std::unique_ptr<MetadataModel> headlessModel;
+        KlvReceiver *rx = nullptr;
+        MetadataModel *model = nullptr;
+        if (role == "headless") {
+            headless = std::make_unique<KlvReceiver>();
+            headlessModel = std::make_unique<MetadataModel>();
+            rx = headless.get();
+            model = headlessModel.get();
+            connect(rx, &KlvReceiver::klvReceived, model, &MetadataModel::ingestNow);
+            rx->apply(loopback(port));
+            rx->start();
+        } else if (role != "send") {
+            page = std::make_unique<VideoPage>();
+            rx = page->klvReceiver();
+            model = page->klvModel();
+            detail = std::make_unique<KlvPage>(rx, model);
+            page->resize(800, 500);
+            page->show();
+            detail->show();
+            rx->apply(loopback(port));
+            page->findChild<QComboBox *>(QStringLiteral("videoSource"))->setCurrentIndex(1);
+            page->findChild<QPushButton *>(QStringLiteral("videoStartStop"))->click();
+        }
+        std::unique_ptr<Sender> sender;
         QTimer pusher;
-        connect(&pusher, &QTimer::timeout, [&] { sender.pushNext(); });
-        pusher.start(33);
+        if (role.isEmpty() || role == "send") {
+            sender = std::make_unique<Sender>(port, Streams::VideoAndKlv);
+            connect(&pusher, &QTimer::timeout, [&] { sender->pushNext(); });
+            pusher.start(33);
+        }
         const auto rssKb = [] {
             QFile f(QStringLiteral("/proc/self/status"));
             if (!f.open(QIODevice::ReadOnly)) return QByteArray();
@@ -604,12 +628,14 @@ private slots:
         t.start();
         while (t.elapsed() < seconds * 1000) {
             qInfo("soak %lld s: %s fds=%d threads=%d frames=%llu superseded=%llu klv=%llu drops=%llu malformed=%llu state=%s",
-                  t.elapsed() / 1000, rssKb().constData(), fileCount(), threadCount(), page.klvReceiver()->videoFrames(),
-                  page.klvReceiver()->framesSuperseded(), page.klvModel()->decoded(), page.klvReceiver()->klvDropped(),
-                  page.klvModel()->malformed(), qPrintable(KlvReceiver::stateText(page.klvReceiver()->state())));
-            QTest::qWait(qMin<qint64>(60000, seconds * 1000 - t.elapsed() + 1));
+                  t.elapsed() / 1000, rssKb().constData(), fileCount(), threadCount(), rx ? rx->videoFrames() : 0,
+                  rx ? rx->framesSuperseded() : 0, model ? model->decoded() : 0, rx ? rx->klvDropped() : 0,
+                  model ? model->malformed() : 0, rx ? qPrintable(KlvReceiver::stateText(rx->state())) : "sender only");
+            QEventLoop loop;  // not QTest::qWait, which sleeps between passes and would count as a slow GUI
+            QTimer::singleShot(qMin<qint64>(60000, seconds * 1000 - t.elapsed() + 1), &loop, &QEventLoop::quit);
+            loop.exec();
         }
-        QCOMPARE(page.klvReceiver()->state(), State::Decoding);
+        if (rx) QCOMPARE(rx->state(), State::Decoding);
     }
 
     // --- The whole window ---

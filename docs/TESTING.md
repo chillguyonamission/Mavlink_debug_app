@@ -45,7 +45,10 @@ and non-GPU descriptors. For a long run, this prints memory, descriptors, thread
 KLV_SOAK_SECONDS=3600 QTEST_FUNCTION_TIMEOUT=3700000 QT_QPA_PLATFORM=offscreen ./build/test_klv_stream soak
 ```
 
-QtTest otherwise kills a test function after 5 minutes, so `QTEST_FUNCTION_TIMEOUT` must exceed the run.
+QtTest otherwise kills a test function after 5 minutes, so `QTEST_FUNCTION_TIMEOUT` must exceed the run. To see which side grows,
+run the sender and receiver apart: `KLV_SOAK_ROLE=send`, and `receive` or `headless` (no widgets), both with the same `KLV_SOAK_PORT`.
+The superseded count there is lower than in the test functions, because `QTest::qWait` sleeps between event passes: 42% of frames
+under it, 9.6% in a real event loop with the sender and offscreen widgets in one process.
 
 `SCREENSHOT_DIR=dir ./build/test_klv_stream screenshots` saves the KLV views against the synthetic stream.
 
@@ -73,6 +76,28 @@ kept one more per pipeline (GStreamer 1.24.2, Intel Meteor Lake, Mesa 25.2.8). A
 and `avdec_h264` and `openh264dec` keep none, so the app does not cause it and has nothing of its own to release. The
 descriptor limit here is 1,048,576, so this should not matter in use. If it does, `GST_PLUGIN_FEATURE_RANK=vah264dec:NONE`
 selects another decoder.
+
+**`avdec_h264` grows by about 20 MB per hour while decoding, so RTP/TS memory is not stable.** Measured with GStreamer 1.24.2 and
+gst-libav 1.24.1, over loopback, with `gst-launch` and no app code:
+
+| Pipeline after `tsdemux` | Growth |
+|---|---|
+| KLV branch only | 0.0 MB/h |
+| `queue ! fakesink` | 0.0 MB/h |
+| `queue ! h264parse ! fakesink` | 0.0 MB/h |
+| `... ! avdec_h264 ! fakesink` | 20.2 MB/h |
+| `... ! avdec_h264 ! videoconvert ! fakesink` | 19.6 MB/h |
+| The same, x264 stream instead of openh264 | 21.0 MB/h |
+| The same, 1280×720 | 22.5 MB/h |
+| `... ! openh264dec ! videoconvert ! fakesink`, Baseline 1280×720, 5 minutes | 0.1 MB/h |
+
+The app matches it (20.0 MB/h without widgets, 19.5 with them), and the test sender on its own is flat. Forcing one malloc arena did not
+help (22.5 against 20.1 MB/h). Over the 58 minutes measured the growth stayed linear, and nothing longer has been run. It is not known
+whether a real payload's stream does the same, or whether this is a leak or a cache inside libav.
+
+`openh264dec` is not used because it was not tried on a real payload's stream, and it exited at once on an x264 stream, likely High
+profile, which was not checked further. The H.264 the ViO beta capture showed was Constrained Baseline. RTSP uses whatever `decodebin`
+picks, which is `vah264dec` on this laptop, and was not measured for this.
 
 ## Hardware checks
 

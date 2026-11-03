@@ -137,6 +137,7 @@ Measured on 2026-11-02 on this Intel Meteor Lake laptop, release build, with rea
 | KLV packet history | 30, plus 30 bad ones | |
 | KLV tags in the table | 256, then dropped and counted | |
 | RTP/TS log | 100 lines | |
+| RTP/TS memory | **No limit: about 20 MB/h from `avdec_h264`** | See *Known resource issues* in `docs/TESTING.md` |
 
 None of these is a bottleneck, so none was changed. Payload pages skip their 4 Hz refresh while hidden, including their
 requests to the payload.

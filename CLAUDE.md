@@ -128,6 +128,8 @@ results, acceptance checklist, limitations). For setup on native Ubuntu, see
   works.
 - **KLV is unverified on hardware from this app.** The only topology evidence is one capture from ViO beta firmware (2026-10-29): video and
   KLV in one TS on `239.255.0.1:8554`, with tags 1, 2, 16–21 and 65 only. Those are not universal settings.
+- **`avdec_h264` grows by about 20 MB/h** with no app code (`docs/TESTING.md`). A flat line needs proof that frames flowed: `openh264dec` stayed flat
+  and did decode, but it exited at once on an x264 stream.
 - **KLV and video are not synchronised.** The panel shows the latest stream metadata. Never present it as describing a frame.
 - **Build:** a full parallel build can exhaust memory. Use `JOBS=2 scripts/build.sh` if the machine
   freezes or a compile is killed.
