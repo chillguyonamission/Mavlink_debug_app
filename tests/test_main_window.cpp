@@ -696,6 +696,9 @@ private slots:
                 QCOMPARE(b->isEnabled(), supported);
                 QCOMPARE(b->toolTip().contains(QStringLiteral("Not supported")), !supported);
             }
+            int bitrateRows = 0;  // a row with the presets: an unsupported one has only its "not supported" item
+            for (QComboBox *c : camera->findChildren<QComboBox *>()) bitrateRows += c->findText(QStringLiteral("0.512 Mbit/s")) > 0;
+            QCOMPARE(bitrateRows, p.irPaletteId ? 2 : 1);
         }
 
         model->setCurrentText(QStringLiteral("ZIO"));

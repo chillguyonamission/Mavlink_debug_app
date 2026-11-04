@@ -140,7 +140,8 @@ and streams**.
 
 | API | Status | HW | Notes |
 |---|---|---|---|
-| `setPayloadStreamBitrate`, `setPayloadStreamResolution`, `setPayloadStreamProfile` | Needs verification | | Values, persistence and RTSP recovery unverified |
+| `setPayloadStreamBitrate` | Implemented | no | Persistence and video recovery unverified. See `API_INTEGRATION.md` |
+| `setPayloadStreamResolution`, `setPayloadStreamProfile` | Needs verification | | Values, persistence and RTSP recovery unverified |
 | `getPayloadStreamBitrate` | Unsupported | | Requests stream information and always returns 0. The app shows the bitrate from the received `VIDEO_STREAM_INFORMATION` instead |
 
 ## Gimbal

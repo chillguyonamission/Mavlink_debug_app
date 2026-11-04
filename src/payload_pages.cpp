@@ -28,6 +28,7 @@
 #include <algorithm>
 #include <limits>
 #include <cmath>
+#include <functional>
 #include <optional>
 
 // ---------------------------------------------------------------------------------------------
@@ -520,27 +521,38 @@ CameraPage::CameraPage(PayloadLink *link, const MavlinkDict *dict, const Payload
 
     // Settings: sent only on a user choice (activated), never when the combo is refreshed
     auto *settings = new QFormLayout;
-    auto addParam = [&](const QString &label, const char *id, const std::vector<ParamOption> &opts) {
+    auto addCombo = [&](const QString &label, bool supported, const std::vector<ParamOption> &opts, const QString &tip, const std::function<bool(unsigned)> &send) {
         auto *cb = new QComboBox;
-        if (!id) {
+        if (!supported) {
             cb->addItem(QStringLiteral("not supported by %1").arg(QLatin1String(m_profile.name)));
             cb->setEnabled(false);
         } else {
             cb->addItem(QStringLiteral("— choose to send —"));
             for (const ParamOption &o : opts) cb->addItem(QString::fromLatin1(o.label), o.value);
-            cb->setToolTip(QStringLiteral("PARAM_EXT_SET %1").arg(QLatin1String(id)));
-            connect(cb, &QComboBox::activated, this, [this, cb, label, id](int i) {
+            cb->setToolTip(tip);
+            connect(cb, &QComboBox::activated, this, [this, cb, send](int i) {
                 if (i <= 0) return;
-                report(m_link->cameraParam(label, id, cb->itemData(i).toUInt()));
+                report(send(cb->itemData(i).toUInt()));
             });
         }
         cb->setMinimumContentsLength(8);
         cb->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);  // fits the side column
         settings->addRow(label, cb);
     };
+    auto addParam = [&](const QString &label, const char *id, const std::vector<ParamOption> &opts) {
+        addCombo(label, id != nullptr, opts, QStringLiteral("PARAM_EXT_SET %1").arg(QLatin1String(id)),
+                 [this, label, id](unsigned v) { return m_link->cameraParam(label, id, v); });
+    };
     addParam(QStringLiteral("View source"), m_profile.viewSourceId, m_profile.viewSources);
     addParam(QStringLiteral("Record source"), m_profile.recordSourceId, m_profile.recordSources);
     addParam(QStringLiteral("IR palette"), m_profile.irPaletteId, m_profile.irPalettes);
+    // The range is from the SDK example's help text, the only source for it
+    const std::vector<ParamOption> bitrates{{512000, "0.512 Mbit/s"}, {1000000, "1 Mbit/s"}, {2000000, "2 Mbit/s"},
+                                            {4000000, "4 Mbit/s"}, {8000000, "8 Mbit/s"}, {16000000, "16 Mbit/s"}};
+    const QString bitrateTip = QStringLiteral("setPayloadStreamBitrate. Sent at once. Confirm it in Analyze › Telemetry, which shows the bitrate the payload "
+                                              "reports. Whether it survives a restart, and what happens to open video, is not verified.");
+    addCombo(QStringLiteral("EO bitrate"), true, bitrates, bitrateTip, [this](unsigned v) { return m_link->streamBitrate(1, v); });
+    addCombo(QStringLiteral("IR bitrate"), m_profile.irPaletteId != nullptr, bitrates, bitrateTip, [this](unsigned v) { return m_link->streamBitrate(2, v); });
     QPushButton *all = button(QStringLiteral("⚙  All camera settings…"),
                               QStringLiteral("Exposure, image, focus and zoom, thermal, OSD and rangefinder, with the values the "
                                              "camera reports"));

@@ -521,6 +521,38 @@ private slots:
         QCOMPARE(find(link, QStringLiteral("IR FFC mode: manual"))->result, int(MAV_RESULT_UNSUPPORTED));
     }
 
+    void streamBitrateOnTheWire()
+    {
+        PayloadLink link;
+        QVERIFY(!link.streamBitrate(1, 4000000));
+        FakePayload fake;
+        link.connectTo(QStringLiteral("127.0.0.1"), fake.port);
+        QTRY_STATE(link, LinkState::SocketOpen, 5000);
+        QVERIFY(fake.learnAppEndpoint());
+        auto checkFrame = [&](float cam, float bps) {
+            MavFrame f;
+            QVERIFY(waitTx(fake, [](const MavFrame &x) { return x.msgid == MAVLINK_MSG_ID_COMMAND_LONG && mavlink_msg_command_long_get_command(&x.msg) == MAV_CMD_USER_4; }, &f));
+            QCOMPARE(int(f.targetComponent), int(TelemetryStore::kPayloadCore));
+            QCOMPARE(mavlink_msg_command_long_get_param1(&f.msg), 4.f);
+            QCOMPARE(mavlink_msg_command_long_get_param2(&f.msg), 2.f);
+            QCOMPARE(mavlink_msg_command_long_get_param3(&f.msg), cam);
+            QCOMPARE(mavlink_msg_command_long_get_param4(&f.msg), 0.f);
+            QCOMPARE(mavlink_msg_command_long_get_param5(&f.msg), bps);
+        };
+        QVERIFY(link.streamBitrate(1, 512000));
+        checkFrame(1, 512000);
+        QVERIFY(link.streamBitrate(2, 16000000));
+        checkFrame(2, 16000000);
+
+        // Each camera's command is tracked on its own, and a rejection is shown as one
+        QTRY_VERIFY_WITH_TIMEOUT(find(link, QStringLiteral("EO stream bitrate: 0.512 Mbit/s"))->state == TrackedCommand::Sent, 3000);
+        QTRY_VERIFY_WITH_TIMEOUT(find(link, QStringLiteral("IR stream bitrate: 16 Mbit/s"))->state == TrackedCommand::Sent, 3000);
+        fake.send(commandAck(TelemetryStore::kPayloadCore, MAV_CMD_USER_4, MAV_RESULT_ACCEPTED));
+        fake.send(commandAck(TelemetryStore::kPayloadCore, MAV_CMD_USER_4, MAV_RESULT_UNSUPPORTED));
+        QTRY_VERIFY_WITH_TIMEOUT(find(link, QStringLiteral("EO stream bitrate: 0.512 Mbit/s"))->state == TrackedCommand::Accepted, 3000);
+        QTRY_VERIFY_WITH_TIMEOUT(find(link, QStringLiteral("IR stream bitrate: 16 Mbit/s"))->state == TrackedCommand::Rejected, 3000);
+    }
+
     void streamAndFovAreKeptPerStreamAndCamera()
     {
         TelemetryStore s;

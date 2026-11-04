@@ -12,7 +12,8 @@ loopback, never a real unit.
 | 1. Stream and FOV telemetry | Implemented | `payload_control`, `main_window` | **Not run** |
 | 2. IR FFC, EO one-push white balance | Implemented | `payload_control`, `main_window` | **Not run** |
 | 3. Gimbal settings read and write | Implemented | `payload_control`, `main_window` | **Not run** |
-| 4. Stream bitrate, resolution, profile | **Not built**: values, persistence and RTSP recovery unverified | None | Not run |
+| 4a. Stream bitrate | Implemented | `payload_control`, `main_window` | **Not run**: check the ACK, the Telemetry value, whether video keeps playing, and whether it survives a restart |
+| 4b. Stream resolution, profile | **Not built**: values, persistence and RTSP recovery unverified | None | Not run |
 | 5. Standby, restart, OrusL SpotAE | **Not built**: recovery unverified, no OrusL unit | None | Not run |
 | 6. GPS and time forwarding | **Not built**: the app has no autopilot source | None | Not run |
 

@@ -41,6 +41,8 @@ results, acceptance checklist, limitations). For setup on native Ubuntu, see
 - 2026-11-03: RTP/TS video + KLV integrated from `Gremsy_KLV_streamer` (`docs/KLV_STREAM.md`). **Tested only against a synthetic stream;**
   no payload was reachable. Open hardware checks are in `docs/DEVELOPMENT_PROGRESS.md`.
 
+- 2026-11-04: stream bitrate presets for EO and IR. **Tested only against the fake payload.** See `docs/API_INTEGRATION.md`.
+
 ## Next steps
 
 1. Native build: `scripts/build.sh` should report 13/13 tests passing. If it fails with a `CMakeCache.txt` path error, the
@@ -65,6 +67,7 @@ results, acceptance checklist, limitations). For setup on native Ubuntu, see
     changing `RC_MODE` (a persistent setting). Re-ask for these.
   - **Not yet approved (new, 2026-11-02):** `TRACK_MODE` = detection, `hw_vio_commands --steps detection` or
     `detection-forward`, FFC and one-push commands, and gimbal parameter writes.
+  - **Not yet approved (new, 2026-11-04):** stream bitrate writes (`setPayloadStreamBitrate`); persistence is unknown.
   - Never write a camera setting value that was not read back through a decoder already checked
     against the camera (`--steps settings-read`).
 - Commit and push to GitHub when a stage or fix is finished.

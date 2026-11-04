@@ -527,6 +527,15 @@ bool PayloadLink::eoWbOnePush()
     return true;
 }
 
+bool PayloadLink::streamBitrate(int cam, quint32 bps)
+{
+    if (!ready()) return false;
+    expectUser4(QStringLiteral("%1 stream bitrate: %2 Mbit/s").arg(cam == 2 ? QStringLiteral("IR") : QStringLiteral("EO")).arg(bps / 1e6), 4, 2, cam);
+    m_sdk->setPayloadStreamBitrate(cam, bps);
+    emit commandsChanged();
+    return true;
+}
+
 bool PayloadLink::gimbalSettingsRead()
 {
     if (!ready()) return false;

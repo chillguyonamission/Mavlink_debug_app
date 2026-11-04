@@ -193,6 +193,18 @@ sends motion or mode commands.
 - **Not exposed:** `sendPayloadGimbalCalibMotor()` sends `MAV_CMD_DO_SET_HOME` with param7 = 1, which does not match its
   name. Calibration and auto-tune were not requested.
 
+## Stream bitrate
+
+| Control | App call | SDK call | On the wire | Answer |
+|---|---|---|---|---|
+| Operate › SETTINGS › EO bitrate, IR bitrate | `streamBitrate(cam, bps)` | `setPayloadStreamBitrate(cam, bps)` | `COMMAND_LONG` `MAV_CMD_USER_4` to compid 26: param1 = 4, param2 = 2, param3 = cam (1 EO, 2 IR), param4 = 0, param5 = bps | `COMMAND_ACK`; new value in `VIDEO_STREAM_INFORMATION` |
+
+- **Values:** fixed presets from 0.512 to 16 Mbit/s. That range appears only in the SDK example's help text. A float holds every value exactly.
+- **Confirming it:** the ACK says only that the command was accepted. Analyze › Telemetry shows the bitrate the payload reports.
+- **Not known:** whether the value survives a restart, whether RTSP or RTP/TS keeps playing, and whether the IR value applies to the current
+  view. The app does not restart video by itself: if the stream drops, it shows the error and waits for Play.
+- Tested only against the fake payload.
+
 ## Not built
 
 These stay out until the stated question is answered. The encodings below are from the SDK source; none has been sent by
@@ -200,7 +212,6 @@ this app. All are `COMMAND_LONG` `MAV_CMD_USER_4` to compid 26.
 
 | Function | SDK call | param1, param2, param3, param4, param5 | Waiting for |
 |---|---|---|---|
-| Stream bitrate | `setPayloadStreamBitrate(cam, bps)` | 4, 2, cam, 0, bps | Whether it persists and how RTSP recovers. The range 512000–16000000 appears only in the example's help text |
 | Stream resolution | `setPayloadStreamResolution(cam, level)` | 4, 2, cam, 1, level | The level list (the example shows only level 1: EO 1920×1080, IR 640×512), persistence, recovery |
 | Stream profile | `setPayloadStreamProfile(cam, profile)` | 4, 2, cam, 2, profile | The profile list (the example shows only 1 = Balance), persistence, recovery |
 | Standby | `setPayloadStandbyMode(on)` | 4, 3, 0, on, 0 | What stops working, and how to recover. Disruptive |
@@ -212,4 +223,4 @@ The stream functions number cameras 1 = EO, 2 = IR, while `getPayloadCameraFOVSt
 0 = EO, 1 = IR, so the two must not share a constant.
 
 The app already reads the current bitrate, resolution and profile-independent stream data from `VIDEO_STREAM_INFORMATION`
-(see *Stream and FOV telemetry*), so a later write can be confirmed from a received message.
+(see *Stream and FOV telemetry*), so a later resolution or profile write can be confirmed from a received message.

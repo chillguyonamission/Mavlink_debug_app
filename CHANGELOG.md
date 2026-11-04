@@ -7,6 +7,8 @@ Newest first. "Tested" means the hardware-free CTest suite unless a line says ha
 
 ### Added
 
+- **Stream bitrate:** EO and IR bitrate presets (0.512 to 16 Mbit/s) in Operate › SETTINGS, changed while connected. Tested with a fake
+  payload; not run on hardware. See `docs/API_INTEGRATION.md`.
 - **RTP/TS video + KLV:** a video source selector in Operate › LIVE VIDEO, alongside RTSP. Plays H.264 from an RTP/MPEG-TS stream and
   decodes MISB ST 0601 KLV from the same stream, with a compact panel under the video and a new Analyze › KLV tab. Decoder and
   model come from the KLV monitor project. Tested with a synthetic stream; not run on hardware. Metadata is the latest in the
@@ -49,7 +51,7 @@ Newest first. "Tested" means the hardware-free CTest suite unless a line says ha
 - From the KLV monitor: QML screens, `VideoItem.h`, the A–G diagnosis, raw KLV and `.ts` recording, and PMT parsing through GStreamer's
   debug log, which would change logging for the whole process including RTSP.
 - Forwarding a selected box to the tracker: no source confirms it works on any model.
-- Stream bitrate, resolution and profile; standby and restart; OrusL SpotAE; GPS and time forwarding: their conditions
+- Stream resolution and profile; standby and restart; OrusL SpotAE; GPS and time forwarding: their conditions
   are not met.
 
 - Separate Lynx or GHadron profiles: the SDK gives them no separate IDs or values.
