@@ -5,6 +5,16 @@ Newest first. "Tested" means the hardware-free CTest suite unless a line says ha
 
 ## Unreleased
 
+### Changed
+
+- **Camera settings:** now a panel under the video instead of a window on top of it, so the picture stays visible while adjusting. It takes the MAVLink monitor's place until closed.
+  Tested with a fake payload; the panel has not been opened on hardware.
+
+### Fixed
+
+- The mouse wheel over any combo box no longer changes it. Qt reports that as a user choice, so scrolling a column past
+  one could send a command, such as the gimbal control source.
+
 ### Added
 
 - **Stream bitrate:** EO and IR bitrate presets (0.512 to 16 Mbit/s) in Operate › SETTINGS, changed while connected. Tested with a fake

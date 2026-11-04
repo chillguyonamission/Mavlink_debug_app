@@ -173,7 +173,7 @@ Everything else the examples show is in the tables above.
 | `payload_download_media_files`, `payload_extract_tiff_file` | Fetch and unpack files from the payload | Not requested. Needs libcurl and JSON |
 | `tests/parse_klv_stream`, `tests/parse_thermal_stream` | Read KLV metadata and thermal data from the video | Not requested. Needs the SDK's MISB library and OpenCV |
 | `camera_time_lapse_photography` | Interval capture | Not requested. The app takes single shots |
-| `camera_ir_isotherm_profile` | Isotherm regions | On MB1, in the settings dialog. Its IDs are in no VIO or OrusL header, so not offered there |
+| `camera_ir_isotherm_profile` | Isotherm regions | On MB1, in the settings panel. Its IDs are in no VIO or OrusL header, so not offered there |
 | `gimbal_do_calib`, `gimbal_calib_auto_tune` | Gimbal calibration | Not requested, and disruptive |
 | `payload_get_video_record_status` | Record status callback | The app reads `CAMERA_CAPTURE_STATUS` instead. Its file URL is not shown |
 | `tests/gamepad_control` | Gamepad control | Not requested |

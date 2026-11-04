@@ -43,6 +43,10 @@ results, acceptance checklist, limitations). For setup on native Ubuntu, see
 
 - 2026-11-04: stream bitrate presets for EO and IR. **Tested only against the fake payload.** See `docs/API_INTEGRATION.md`.
 
+- 2026-11-04, later: camera settings moved from a floating window to a panel under the video, replacing the MAVLink monitor until closed. The wheel no
+  longer changes combos. Tested only offscreen against the fake payload. The real app ran live on a VIO with **3.1.9.24**: heartbeat, RTP/TS and KLV work.
+  That unit has RTSP off, and sends KLV over UDP unicast to `192.168.55.100:8554`, so the Address must be that, not the default multicast group.
+
 ## Next steps
 
 1. Native build: `scripts/build.sh` should report 13/13 tests passing. If it fails with a `CMakeCache.txt` path error, the

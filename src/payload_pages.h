@@ -91,6 +91,7 @@ public:
 
 signals:
     void trackArmedChanged(bool armed);
+    void settingsToggled(bool show);  // the "All camera settings" button; the main window owns the panel
 
 protected:
     void refresh() override;
@@ -103,15 +104,15 @@ private:
     const PayloadProfile &m_profile;
     QSlider *m_zoomRange;
     QPushButton *m_recBtn, *m_armBtn = nullptr, *m_centreBtn = nullptr;
-    QDialog *m_settingsDialog = nullptr, *m_detectionDialog = nullptr;
+    QDialog *m_detectionDialog = nullptr;
     QLabel *m_zoomReadout, *m_track = nullptr, *m_detection = nullptr;
     QLabel *m_capture, *m_video, *m_storage, *m_settings, *m_reported;
     bool m_trackArmed = false;
     quint16 m_selectedDetection = 0;
 };
 
-// Every camera setting in the profile, showing what the camera reports (PARAM_EXT_VALUE). Opened as a dialog
-// from the camera panel; reads all settings each time it is shown.
+// Every camera setting in the profile, showing what the camera reports (PARAM_EXT_VALUE). A panel under the
+// video, so the picture stays visible; reads all settings each time it is shown.
 class CameraSettingsPage : public PayloadPage
 {
     Q_OBJECT

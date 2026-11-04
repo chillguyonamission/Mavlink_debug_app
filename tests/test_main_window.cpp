@@ -10,6 +10,9 @@
 #include "video_player.h"
 
 #include <QApplication>
+#include <QWheelEvent>
+
+#include <algorithm>
 #include <QComboBox>
 #include <QDialog>
 #include <QDoubleSpinBox>
@@ -264,24 +267,59 @@ private slots:
         for (QPushButton *b : w.findChildren<QPushButton *>())
             if (b->text().contains(QStringLiteral("All camera settings"))) all = b;
         QVERIFY(all && all->isEnabled());
+        w.resize(1440, 900);
+        QTest::qWait(50);
+        const int windowWidth = w.width();
+        auto *videoView = w.findChild<VideoPage *>()->view();
+        const int videoWidth = videoView->width();
+        auto *monitor = w.findChild<InspectorWidget *>();
+        QVERIFY(monitor->isVisible());
+        const int monitorHeight = monitor->height();
+        auto *settings = w.findChild<CameraSettingsPage *>();
+        QVERIFY(settings && !settings->isVisible());
         all->click();
-        auto *dialog = w.findChild<QDialog *>();
-        QVERIFY(dialog && dialog->isVisible());
+        QVERIFY(settings->isVisible());
+        QCoreApplication::processEvents();
+        // Under the video, not over it: the same width, a 16:9 picture at least 300 px tall, and the window does not grow
+        QTest::qWait(50);
+        QCOMPARE(videoView->width(), videoWidth);
+        QVERIFY2(std::min(double(videoView->height()), videoView->width() * 9.0 / 16) >= 300, qPrintable(QString::number(videoView->height())));
+        QVERIFY(w.findChild<GimbalPage *>()->isVisible() && w.findChild<CameraPage *>()->isVisible() && !monitor->isVisible());
+        QVERIFY(videoView->isVisible() && !videoView->visibleRegion().isEmpty());
+        QCOMPARE(w.width(), windowWidth);
+        QVERIFY(!QRect(videoView->mapTo(&w, QPoint()), videoView->size()).intersects(QRect(settings->mapTo(&w, QPoint()), settings->size())));
         QComboBox *wb = nullptr;
-        for (QComboBox *c : dialog->findChildren<QComboBox *>())
+        for (QComboBox *c : settings->findChildren<QComboBox *>())
             if (c->findText(QStringLiteral("ATW (auto tracing)")) >= 0) wb = c;
         QVERIFY(wb);
         QTRY_COMPARE_WITH_TIMEOUT(wb->currentText(), QStringLiteral("Outdoor"), 3000);
-        bool listRequested = false;  // opening the dialog reads every setting
+        bool listRequested = false;  // opening the panel reads every setting
         QTRY_VERIFY_WITH_TIMEOUT([&] {
             for (const MavFrame &f : fake.received()) listRequested |= f.msgid == MAVLINK_MSG_ID_PARAM_EXT_REQUEST_LIST;
             return listRequested;
         }(), 3000);
         if (const QByteArray dir = qgetenv("SCREENSHOT_DIR"); !dir.isEmpty()) {
             QTest::qWait(300);
-            dialog->grab().save(QString::fromLocal8Bit(dir) + QStringLiteral("/camera_settings.png"));
+            w.grab().save(QString::fromLocal8Bit(dir) + QStringLiteral("/camera_settings.png"));
         }
-        dialog->close();
+        // The wheel over a combo in the panel scrolls: it must not change the setting or send anything
+        const QPoint wbCentre = wb->rect().center();
+        const auto paramSets = [&] {
+            int n = 0;
+            for (const MavFrame &f : fake.received()) n += f.msgid == MAVLINK_MSG_ID_PARAM_EXT_SET;
+            return n;
+        };
+        const int setsBefore = paramSets();
+        const QString wbBefore = wb->currentText();
+        QWheelEvent wheel(QPointF(wbCentre), QPointF(wb->mapToGlobal(wbCentre)), {}, QPoint(0, -120), Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
+        QApplication::sendEvent(wb, &wheel);
+        QTest::qWait(200);
+        QCOMPARE(wb->currentText(), wbBefore);
+        QCOMPARE(paramSets(), setsBefore);
+        all->click();
+        QVERIFY(!settings->isVisible() && monitor->isVisible());
+        QTest::qWait(50);
+        QCOMPARE(monitor->height(), monitorHeight);
 
         if (const QByteArray dir = qgetenv("SCREENSHOT_DIR"); !dir.isEmpty()) {
             w.resize(1440, 900);
@@ -681,11 +719,11 @@ private slots:
                 if (b->text().contains(QStringLiteral("All camera settings"))) all = b;
             QVERIFY(all && all->isEnabled());
             all->click();
-            auto *dialog = camera->findChild<QDialog *>();
-            QVERIFY(dialog);
-            auto *tabs = dialog->findChild<QTabWidget *>();
+            auto *settings = w.findChild<CameraSettingsPage *>();
+            QVERIFY(settings);
+            auto *tabs = settings->findChild<QTabWidget *>();
             QVERIFY2(tabs && tabs->count() >= 2, qPrintable(model->currentText()));
-            dialog->close();
+            all->click();
             // Controls follow the profile, and a disabled one says why
             const PayloadProfile &p = profileByName(model->currentText());
             for (const auto &[text, supported] : {std::pair{"FFC auto", p.irFfc}, {"FFC manual", p.irFfc}, {"Trigger FFC", p.irFfc}, {"WB one push", p.wbOnePush},
@@ -746,19 +784,22 @@ private slots:
         QTest::qWait(4000);  // info replies and parameter streams
         shootViews(w, QString::fromLocal8Bit(dir), QStringLiteral("hw_"));
 
-        // Camera settings dialog with the camera's values (opening it only reads)
-        for (QPushButton *b : w.findChildren<QPushButton *>()) if (b->text().contains(QStringLiteral("All camera settings"))) b->click();
-        auto *dialog = w.findChild<QDialog *>();
-        QVERIFY(dialog);
+        // Camera settings panel with the camera's values (opening it only reads)
+        QPushButton *allSettings = nullptr;
+        for (QPushButton *b : w.findChildren<QPushButton *>()) if (b->text().contains(QStringLiteral("All camera settings"))) allSettings = b;
+        QVERIFY(allSettings);
+        allSettings->click();
+        auto *settings = w.findChild<CameraSettingsPage *>();
+        QVERIFY(settings);
         QTRY_VERIFY_WITH_TIMEOUT(w.link()->telemetry().cameraParams().size() >= 40, 5000);
         QTest::qWait(500);
-        auto *tabs = dialog->findChild<QTabWidget *>();
+        auto *tabs = settings->findChild<QTabWidget *>();
         for (int i = 0; i < tabs->count(); ++i) {
             tabs->setCurrentIndex(i);
             QTest::qWait(400);
-            dialog->grab().save(QString::fromLocal8Bit(dir) + QStringLiteral("/hw_camera_settings_%1.png").arg(i));
+            w.grab().save(QString::fromLocal8Bit(dir) + QStringLiteral("/hw_camera_settings_%1.png").arg(i));
         }
-        dialog->close();
+        allSettings->click();
 
         // HW_TRACK=1 also tracks the picture centre (approved: the gimbal may move a little) to compare the HUD box
         // with the box the camera's own OSD draws

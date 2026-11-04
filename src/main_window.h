@@ -37,6 +37,7 @@ public:
     std::vector<BootCheck> bootChecks() const;  // what the constructor loaded, for the boot splash
 
 protected:
+    bool eventFilter(QObject *o, QEvent *e) override;
     void closeEvent(QCloseEvent *e) override;
 
 private:
@@ -50,6 +51,7 @@ private:
     void reloadProfiles(const QString &select = {});
     void saveProfile();
     void deleteProfile();
+    void showCameraSettings(bool show);
     void setModel(const PayloadProfile &p);  // rebuilds the gimbal and camera pages for this payload model
 
     MavlinkDict m_dict;
@@ -59,7 +61,10 @@ private:
     VideoPage *m_video;
     CameraPage *m_camera = nullptr;
     const PayloadProfile *m_profile = nullptr;
-    QScrollArea *m_gimbalCol, *m_cameraCol;
+    QScrollArea *m_gimbalCol, *m_cameraCol, *m_settingsCol;
+    QWidget *m_settingsPanel;
+    QList<int> m_sizesBeforeSettings;
+    static constexpr int kSettingsPanelHeight = 320;
     QComboBox *m_modelBox;
     QLabel *m_subtitle;
 

@@ -11,6 +11,7 @@
 #include "video_page.h"
 #include "video_player.h"
 
+#include <QApplication>
 #include <QButtonGroup>
 #include <QCloseEvent>
 #include <QComboBox>
@@ -129,6 +130,7 @@ MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent), m_link(new PayloadLink(this))
 {
     setWindowTitle(QStringLiteral("Payload Control Station"));
+    qApp->installEventFilter(this);
 
     // --- Connection fields (settings drawer) ---
     m_ip = new QLineEdit;
@@ -237,6 +239,9 @@ MainWindow::MainWindow(QWidget *parent)
     });
     m_gimbalCol = column(new QWidget);  // pages: setModel()
     m_cameraCol = column(new QWidget);
+    m_settingsCol = column(new QWidget);
+    m_settingsPanel = panel(QStringLiteral("CAMERA SETTINGS"), m_settingsCol);
+    m_settingsPanel->hide();
 
     auto *videoRow = new QHBoxLayout;
     auto *videoTitle = new QLabel(QStringLiteral("VIDEO"));
@@ -346,6 +351,7 @@ MainWindow::MainWindow(QWidget *parent)
     m_vsplit->setChildrenCollapsible(false);
     m_vsplit->addWidget(m_views);
     m_vsplit->addWidget(m_monitor);
+    m_vsplit->addWidget(m_settingsPanel);  // last, so a saved two-pane layout still fits
     m_vsplit->setStretchFactor(0, 1);
     m_vsplit->setStretchFactor(1, 0);
     m_vsplit->setSizes({620, 240});
@@ -439,6 +445,7 @@ MainWindow::~MainWindow()
 
 void MainWindow::closeEvent(QCloseEvent *e)
 {
+    showCameraSettings(false);  // the saved layout is the monitor's, and the panel starts closed
     saveSettings();
     e->accept();
 }
@@ -504,6 +511,34 @@ void MainWindow::deleteProfile()
     reloadProfiles();
 }
 
+// Qt sends a combo's activated() on the wheel, and a combo here sends a command: scrolling a column past one must not.
+// Ignored, the event goes on to the scroll area.
+bool MainWindow::eventFilter(QObject *o, QEvent *e)
+{
+    if (e->type() == QEvent::Wheel && qobject_cast<QComboBox *>(o)) {
+        e->ignore();
+        return true;
+    }
+    return QMainWindow::eventFilter(o, e);
+}
+
+// Takes the monitor's place under the video. Beside it, a 1440 px window would leave the picture 468 px wide; here
+// it loses only the letterbox bars.
+void MainWindow::showCameraSettings(bool show)
+{
+    if (show == m_settingsPanel->isVisible()) return;
+    if (show) {
+        m_sizesBeforeSettings = m_vsplit->sizes();
+        m_monitor->hide();
+        m_settingsPanel->show();
+        m_vsplit->setSizes({m_vsplit->height() - kSettingsPanelHeight, 0, kSettingsPanelHeight});
+    } else {
+        m_settingsPanel->hide();
+        m_monitor->show();
+        m_vsplit->setSizes(m_sizesBeforeSettings);
+    }
+}
+
 void MainWindow::setModel(const PayloadProfile &p)
 {
     m_profile = &p;
@@ -513,7 +548,10 @@ void MainWindow::setModel(const PayloadProfile &p)
     m_video->view()->selectDetection(0);
     m_camera = new CameraPage(m_link, dict, p);
     connect(m_camera, &CameraPage::trackArmedChanged, m_video->view(), &VideoView::setPickMode);
-    for (const auto &[col, page] : {std::pair<QScrollArea *, QWidget *>{m_gimbalCol, new GimbalPage(m_link, dict, p)}, {m_cameraCol, m_camera}}) {
+    connect(m_camera, &CameraPage::settingsToggled, this, &MainWindow::showCameraSettings);
+    showCameraSettings(false);  // the new camera page's button starts unchecked
+    for (const auto &[col, page] : {std::pair<QScrollArea *, QWidget *>{m_gimbalCol, new GimbalPage(m_link, dict, p)}, {m_cameraCol, m_camera},
+                                    {m_settingsCol, new CameraSettingsPage(m_link, dict, p)}}) {
         col->setWidget(page);  // deletes the previous page
         page->setAutoFillBackground(false);  // setWidget() turned it on; the panel colour shows through
     }

@@ -337,7 +337,8 @@ Notes:
     from `TRK_POS_X/Y/W/H`, where X/Y is the box's **top-left** corner.
   - **Pixel space:** 1920×1080 for the target and the box, confirmed against the box the camera's own OSD
     draws in the 1280×720 stream.
-- **Camera settings dialog** (**⚙ All camera settings…** in the camera column): exposure, image, focus and
+- **Camera settings panel** (**⚙ All camera settings…** in the camera column opens and closes it): a pane under the
+  video, which stays visible and playing. It takes the MAVLink monitor's place until closed; capture keeps running. Exposure, image, focus and
   zoom, thermal, video/OSD/rangefinder, 30 settings from `vio_sdk.h`. Opening it reads every setting
   (`PARAM_EXT_REQUEST_LIST`); the controls show what the camera reports. A change is sent at once and read
   back (`PARAM_EXT_REQUEST_READ`), because the VIO's `PARAM_EXT_ACK` carries no value. A number is only

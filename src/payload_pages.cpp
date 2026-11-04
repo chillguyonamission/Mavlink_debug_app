@@ -557,19 +557,8 @@ CameraPage::CameraPage(PayloadLink *link, const MavlinkDict *dict, const Payload
                               QStringLiteral("Exposure, image, focus and zoom, thermal, OSD and rangefinder, with the values the "
                                              "camera reports"));
     all->setEnabled(!m_profile.cameraSettings.empty());
-    connect(all, &QPushButton::clicked, this, [this] {
-        if (!m_settingsDialog) {
-            m_settingsDialog = new QDialog(this);
-            m_settingsDialog->setWindowTitle(QStringLiteral("Camera settings · %1").arg(QLatin1String(m_profile.name)));
-            auto *l = new QVBoxLayout(m_settingsDialog);
-            l->setContentsMargins(0, 0, 0, 0);
-            l->addWidget(new CameraSettingsPage(m_link, m_dict, m_profile));
-            m_settingsDialog->resize(720, 520);
-        }
-        m_settingsDialog->show();
-        m_settingsDialog->raise();
-        m_settingsDialog->activateWindow();
-    });
+    all->setCheckable(true);
+    connect(all, &QPushButton::toggled, this, &CameraPage::settingsToggled);
     settings->insertRow(0, all);
 
     auto *controls = new QWidget;
@@ -768,8 +757,8 @@ CameraSettingsPage::CameraSettingsPage(PayloadLink *link, const MavlinkDict *dic
             auto *w = new QWidget;
             auto *outer = new QVBoxLayout(w);
             g = new QGridLayout;
-            g->setColumnStretch(1, 1);
             g->setColumnMinimumWidth(2, 170);
+            g->setColumnStretch(3, 1);  // the panel spans the window: the controls keep their natural width
             outer->addLayout(g);
             outer->addStretch();
             tabs->addTab(w, group);
