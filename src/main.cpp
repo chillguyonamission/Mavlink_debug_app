@@ -5,6 +5,7 @@
 
 int main(int argc, char *argv[])
 {
+    QCoreApplication::setAttribute(Qt::AA_ShareOpenGLContexts);  // Qt WebEngine (Web settings tab) needs it before the app exists
     QApplication app(argc, argv);
     QApplication::setOrganizationName(QStringLiteral("Gremsy"));
     QApplication::setApplicationName(QStringLiteral("MavlinkDebugApp"));

@@ -1,5 +1,6 @@
 #include "main_window.h"
 
+#include "diagnostics_page.h"
 #include "inspector_widget.h"
 #include "payload_pages.h"
 #include "payload_profile.h"
@@ -10,11 +11,14 @@
 #include "klv_receiver.h"
 #include "video_page.h"
 #include "video_player.h"
+#include "web_settings_page.h"
 
 #include <QApplication>
 #include <QButtonGroup>
 #include <QCloseEvent>
 #include <QComboBox>
+#include <QDateTime>
+#include <QSysInfo>
 #include <QInputDialog>
 #include <QMessageBox>
 #include <QHBoxLayout>
@@ -34,12 +38,6 @@
 
 static const char *kDefaultIp = "192.168.55.1";  // PayloadSDK v3 README default
 static const int kDefaultPort = 14566;
-// Payload core, camera, gimbal. A VIO uses 26, 100 and 154 (README "Hardware checks"); the SDK follows a camera or gimbal
-// on any of these IDs, so another model may too.
-static const QList<QList<quint8>> kPayloadComponents{
-    {TelemetryStore::kPayloadCore},
-    {MAV_COMP_ID_CAMERA, MAV_COMP_ID_CAMERA2, MAV_COMP_ID_CAMERA3, MAV_COMP_ID_CAMERA4, MAV_COMP_ID_CAMERA5, MAV_COMP_ID_CAMERA6},
-    {MAV_COMP_ID_GIMBAL, MAV_COMP_ID_GIMBAL2, MAV_COMP_ID_GIMBAL3, MAV_COMP_ID_GIMBAL4, MAV_COMP_ID_GIMBAL5, MAV_COMP_ID_GIMBAL6}};
 
 static const char *lampColor(Lamp l)
 {
@@ -280,9 +278,10 @@ MainWindow::MainWindow(QWidget *parent)
     m_nav = new QButtonGroup(this);
     auto *nav = new QHBoxLayout;
     nav->setSpacing(0);
-    for (const auto &[id, text, name] : {std::tuple{0, "OPERATE", "navOperate"}, std::tuple{1, "ANALYZE", "navAnalyze"}}) {
-        QPushButton *b = button(QLatin1String(text), id ? QStringLiteral("Command log, payload telemetry and traffic statistics")
-                                                        : QStringLiteral("Video with gimbal and camera control"), "segment");
+    for (const auto &[id, text, name, tip] : {std::tuple{0, "OPERATE", "navOperate", "Video with gimbal and camera control"},
+                                              std::tuple{1, "ANALYZE", "navAnalyze", "Command log, payload telemetry and traffic statistics"},
+                                              std::tuple{2, "DIAGNOSE", "navDiagnose", "Health check, network check, payload web settings and a report"}}) {
+        QPushButton *b = button(QLatin1String(text), QLatin1String(tip), "segment");
         b->setObjectName(QLatin1String(name));
         b->setCheckable(true);
         b->setMinimumWidth(96);
@@ -341,9 +340,46 @@ MainWindow::MainWindow(QWidget *parent)
     tabs->addTab(m_statsPage, QStringLiteral("Statistics"));
     tabs->addTab(new KlvPage(m_video->klvReceiver(), m_video->klvModel()), QStringLiteral("KLV"));
 
+    // --- Diagnose ---
+    m_diag = new DiagnosticsPage(
+        [this] {
+            DiagInput in;
+            in.state = m_link->state();
+            in.nowMs = PayloadLink::monoNs() / 1000000;
+            in.timeoutMs = m_link->timeoutMs();
+            in.heartbeats = m_link->heartbeatSources();
+            in.telemetry = &m_link->telemetry();
+            in.traffic = m_stats;
+            in.captureDrops = m_link->droppedDatagrams();
+            in.flows = &m_statsPage->flows();
+            in.tracker = &m_link->tracker();
+            in.dict = m_dict.isLoaded() ? &m_dict : nullptr;
+            in.profile = m_profile;
+            return in;
+        },
+        [this] {
+            return QStringList{QStringLiteral("Gremsy payload diagnostic report"),
+                               QStringLiteral("Date: %1").arg(QDateTime::currentDateTime().toString(Qt::ISODate)),
+                               QStringLiteral("App: %1 (%2)").arg(QStringLiteral(APP_GIT), QSysInfo::prettyProductName()),
+                               QStringLiteral("Payload: %1, model set to %2").arg(m_link->target().isEmpty() ? m_ip->text() : m_link->target(),
+                                                                                    QString::fromLatin1(m_profile->name)),
+                               QStringLiteral("Link: %1").arg(linkStateText(m_link->state()))};
+        });
+    connect(m_ip, &QLineEdit::textChanged, m_diag, &DiagnosticsPage::setPayloadIp);
+    m_diag->setPayloadIp(m_ip->text());
+    auto *diagTabs = new QTabWidget;
+    diagTabs->setObjectName(QStringLiteral("diagnoseTabs"));
+    diagTabs->setDocumentMode(true);
+    diagTabs->addTab(m_diag, QStringLiteral("Health check"));
+    auto *web = new WebSettingsPage;
+    connect(m_ip, &QLineEdit::textChanged, web, &WebSettingsPage::setPayloadIp);
+    web->setPayloadIp(m_ip->text());
+    diagTabs->addTab(web, QStringLiteral("Web settings"));
+
     m_views = new QStackedWidget;
     m_views->addWidget(m_hsplit);
     m_views->addWidget(tabs);
+    m_views->addWidget(diagTabs);
     connect(m_nav, &QButtonGroup::idClicked, m_views, &QStackedWidget::setCurrentIndex);
 
     m_monitor = panel({}, m_inspector);
@@ -426,7 +462,7 @@ MainWindow::MainWindow(QWidget *parent)
     restoreGeometry(s.value(QStringLiteral("ui/geometry")).toByteArray());
     m_hsplit->restoreState(s.value(QStringLiteral("ui/hsplit")).toByteArray());
     m_vsplit->restoreState(s.value(QStringLiteral("ui/vsplit")).toByteArray());
-    const int view = qBound(0, s.value(QStringLiteral("ui/view")).toInt(), 1);
+    const int view = qBound(0, s.value(QStringLiteral("ui/view")).toInt(), 2);
     m_nav->button(view)->setChecked(true);
     m_views->setCurrentIndex(view);
     m_inspector->setCollapsed(s.value(QStringLiteral("ui/monitorCollapsed"), false).toBool());

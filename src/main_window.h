@@ -9,6 +9,7 @@
 #include <QMainWindow>
 
 class CameraPage;
+class DiagnosticsPage;
 class InspectorWidget;
 class PayloadLink;
 class QButtonGroup;
@@ -58,6 +59,7 @@ private:
     PayloadLink *m_link;
     InspectorWidget *m_inspector;
     StatsWidget *m_statsPage;
+    DiagnosticsPage *m_diag;
     VideoPage *m_video;
     CameraPage *m_camera = nullptr;
     const PayloadProfile *m_profile = nullptr;

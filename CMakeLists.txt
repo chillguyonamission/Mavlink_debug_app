@@ -4,7 +4,7 @@ project(MavlinkDebugApp LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
-find_package(Qt6 REQUIRED COMPONENTS Widgets Test)
+find_package(Qt6 REQUIRED COMPONENTS Widgets Network Test)
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE RelWithDebInfo)
 endif()
@@ -69,7 +69,7 @@ target_compile_options(mavcore PRIVATE ${APP_WARNINGS})
 add_library(appcore STATIC
     src/link_health.cpp src/payload_link.cpp src/frame_model.cpp src/frame_filter.cpp
     src/frame_text.cpp src/frame_writer.cpp src/flow_stats.cpp src/mavlink_dict.cpp
-    src/command_tracker.cpp src/telemetry.cpp src/detection.cpp src/misb0601.cpp src/metadata_model.cpp src/payload_profile_vio.cpp src/payload_profile_zio.cpp src/payload_profile_mb1.cpp src/payload_profile_orusl.cpp src/profiles.cpp src/pcap_capture.cpp)
+    src/command_tracker.cpp src/telemetry.cpp src/detection.cpp src/misb0601.cpp src/metadata_model.cpp src/payload_profile_vio.cpp src/payload_profile_zio.cpp src/payload_profile_mb1.cpp src/payload_profile_orusl.cpp src/profiles.cpp src/pcap_capture.cpp src/diagnostics.cpp)
 target_include_directories(appcore PUBLIC src ${SDK_DIR}/libs)  # libs: detection_packet.h, which has no other SDK dependency
 target_link_libraries(appcore PUBLIC Qt6::Gui mavcore PkgConfig::PCAP PRIVATE PayloadSDK)
 target_compile_options(appcore PRIVATE ${APP_WARNINGS})
@@ -79,8 +79,20 @@ target_compile_definitions(appcore PRIVATE
 
 # --- Widgets and the GUI application ---
 add_library(appgui STATIC src/theme.cpp src/main_window.cpp src/inspector_widget.cpp src/stats_widget.cpp src/payload_pages.cpp
-    src/video_player.cpp src/video_page.cpp src/klv_receiver.cpp src/klv_page.cpp src/splash.cpp)
-target_link_libraries(appgui PUBLIC Qt6::Widgets appcore PRIVATE PkgConfig::GSTVIDEO)
+    src/video_player.cpp src/video_page.cpp src/klv_receiver.cpp src/klv_page.cpp src/splash.cpp src/diagnostics_page.cpp src/web_settings_page.cpp)
+target_link_libraries(appgui PUBLIC Qt6::Widgets Qt6::Network appcore PRIVATE PkgConfig::GSTVIDEO)
+# Shown in diagnostic reports; the SDK commit is what the update check compares against upstream
+execute_process(COMMAND git rev-parse HEAD WORKING_DIRECTORY ${SDK_DIR} OUTPUT_VARIABLE SDK_COMMIT OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+execute_process(COMMAND git describe --always --dirty --exclude "*" WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+                OUTPUT_VARIABLE APP_GIT OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+target_compile_definitions(appgui PRIVATE SDK_COMMIT="${SDK_COMMIT}" APP_GIT="${APP_GIT}")
+find_package(Qt6 QUIET COMPONENTS WebEngineWidgets)  # optional: the Web settings tab falls back to the system browser
+if(Qt6WebEngineWidgets_FOUND)
+    target_link_libraries(appgui PRIVATE Qt6::WebEngineWidgets)
+    target_compile_definitions(appgui PRIVATE HAVE_WEBENGINE)
+else()
+    message(STATUS "Qt WebEngine not found: Web settings opens the system browser (apt install qt6-webengine-dev to embed it)")
+endif()
 if(WIN32)
     target_link_libraries(appgui PRIVATE iphlpapi)  # if_nametoindex
 endif()
@@ -113,7 +125,7 @@ target_link_libraries(test_klv_stream PRIVATE Qt6::Test appgui PkgConfig::GSTVID
 add_test(NAME klv_stream COMMAND test_klv_stream)
 set_tests_properties(klv_stream PROPERTIES TIMEOUT 300 ENVIRONMENT QT_QPA_PLATFORM=offscreen)
 
-set(APP_TESTS link_logic payload_link inspector payload_control pcap main_window detection misb0601 metadata_model)
+set(APP_TESTS link_logic payload_link inspector payload_control pcap main_window detection misb0601 metadata_model diagnostics)
 if(WIN32)
     list(REMOVE_ITEM APP_TESTS pcap)  # calls libpcap directly; CI runners cannot install Npcap (no silent free install)
 endif()
