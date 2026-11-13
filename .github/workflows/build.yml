@@ -93,3 +93,16 @@ jobs:
           if ($missing) { Write-Output "Missing GStreamer elements: $missing" }
       - name: Test
         run: ctest --test-dir build --output-on-failure
+      - name: Video test logs (on failure)
+        if: failure()
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
+          GST_DEBUG: "2"
+        run: |
+          foreach ($t in "test_video", "test_klv_stream") {
+            $p = Start-Process "build\$t.exe" -ArgumentList "-o $t.txt,txt" -RedirectStandardError "$t.err" -PassThru -NoNewWindow
+            if (-not $p.WaitForExit(90000)) { $p.Kill(); "== $t KILLED after 90 s" }
+            "== $t log"; Get-Content "$t.txt" -ErrorAction SilentlyContinue
+            "== $t stderr (last 60 lines)"; Get-Content "$t.err" -Tail 60 -ErrorAction SilentlyContinue
+          }
