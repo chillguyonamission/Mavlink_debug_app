@@ -134,8 +134,11 @@ private slots:
         QVERIFY(!with([](auto &c) { c.media = QStringLiteral("audio"); }).isEmpty());
         QVERIFY(!with([](auto &c) { c.encoding = QStringLiteral("H264"); }).isEmpty());
         QVERIFY(!with([](auto &c) { c.clockRate = 0; }).isEmpty());
-        QVERIFY(with([](auto &c) { c.iface = QStringLiteral("lo"); }).isEmpty());
-        QVERIFY(KlvReceiver::interfaces().contains(QStringLiteral("lo")));
+        // Every listed interface validates; loopback is always listed ("lo" on Linux, "loopback_0" on Windows)
+        const QStringList ifaces = KlvReceiver::interfaces();
+        QVERIFY(ifaces.contains(QStringLiteral("lo")) || ifaces.contains(QStringLiteral("loopback_0")));
+        for (const QString &name : ifaces)
+            QVERIFY2(with([&](auto &c) { c.iface = name; }).isEmpty(), qPrintable(name));
     }
 
     void settingsPersistOnlyWhenValid()

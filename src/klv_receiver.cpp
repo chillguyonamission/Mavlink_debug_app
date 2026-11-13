@@ -10,7 +10,7 @@
 #ifdef _WIN32
 #include <winsock2.h>
 #include <ws2tcpip.h>
-#include <iphlpapi.h>  // if_nametoindex
+#include <iphlpapi.h>  // if_nametoindex, GetAdaptersAddresses
 #else
 #include <arpa/inet.h>
 #include <net/if.h>
@@ -97,7 +97,22 @@ QString KlvReceiver::validate(const Config &c)
 QStringList KlvReceiver::interfaces()
 {
     QStringList out;
-#ifndef _WIN32  // shortcut: Windows lists none, so the kernel picks the multicast interface; add one if a PC has several
+#ifdef _WIN32
+    // Windows has no if_nameindex(): list IPv4 adapters by the names if_nametoindex() accepts (e.g. "ethernet_32769")
+    ULONG size = 16 * 1024;
+    QByteArray buf;
+    ULONG rc;
+    do {
+        buf.resize(int(size));
+        rc = GetAdaptersAddresses(AF_INET, GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER, nullptr,
+                                  reinterpret_cast<IP_ADAPTER_ADDRESSES *>(buf.data()), &size);
+    } while (rc == ERROR_BUFFER_OVERFLOW);
+    if (rc == NO_ERROR)
+        for (auto *a = reinterpret_cast<IP_ADAPTER_ADDRESSES *>(buf.data()); a; a = a->Next) {
+            char name[IF_MAX_STRING_SIZE + 1];
+            if (ConvertInterfaceLuidToNameA(&a->Luid, name, sizeof name) == NO_ERROR) out << QString::fromLocal8Bit(name);
+        }
+#else
     if (struct if_nameindex *list = ::if_nameindex()) {
         for (struct if_nameindex *i = list; i->if_index; ++i)
             out << QString::fromLocal8Bit(i->if_name);
