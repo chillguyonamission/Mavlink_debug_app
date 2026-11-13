@@ -24,7 +24,7 @@ index eb7e8df..56de2b0 100644
      PUBLIC 
              ${CMAKE_CURRENT_SOURCE_DIR}
 diff --git a/libs/payloadSdkInterface.cpp b/libs/payloadSdkInterface.cpp
-index 6250b4b..1f35ec4 100644
+index 6250b4b..a900185 100644
 --- a/libs/payloadSdkInterface.cpp
 +++ b/libs/payloadSdkInterface.cpp
 @@ -89,7 +89,12 @@ PayloadSdkInterface::
@@ -62,6 +62,15 @@ index 6250b4b..1f35ec4 100644
          return false;
      }
      recv_thread_started = true; // App patch
+@@ -1979,7 +1985,7 @@ _handle_msg_debug(mavlink_message_t* msg){
+         // params value from the gimbal
+         if(__notifyPayloadParamChanged != NULL){
+             double params[2] = {value.ind, value.value};
+-            __notifyPayloadParamChanged(PAYLOAD_GB_PARAMS, "", params);
++            __notifyPayloadParamChanged(PAYLOAD_GB_PARAMS, (char *)"", params);
+         }
+     }
+ }
 diff --git a/libs/payloadSdkInterface.h b/libs/payloadSdkInterface.h
 index b316a76..cf4c12e 100644
 --- a/libs/payloadSdkInterface.h
@@ -77,7 +86,7 @@ index b316a76..cf4c12e 100644
      uint8_t payload_ctrl_type = CONTROL_METHOD;
      Generic_Port *port = nullptr;
 diff --git a/libs/payloadsdk.h b/libs/payloadsdk.h
-index a53971c..f5a0344 100644
+index a53971c..513ff4a 100644
 --- a/libs/payloadsdk.h
 +++ b/libs/payloadsdk.h
 @@ -5,7 +5,9 @@
@@ -90,6 +99,15 @@ index a53971c..f5a0344 100644
  #include "udp_port.h"
  
  #include "payload_enum.h"
+@@ -77,7 +79,7 @@ typedef struct {
+     uint8_t type;
+ } cam_param_union_t;
+ 
+-typedef struct
++typedef struct RecordStatus_t // MSVC: an unnamed typedef struct may not have default member initializers
+ {
+     int rec_src          = 0;
+     int rec_status       = 0;
 diff --git a/libs/third-party/mavlink/include/autopilot_interface.h b/libs/third-party/mavlink/include/autopilot_interface.h
 index 080632e..3b7d2dd 100644
 --- a/libs/third-party/mavlink/include/autopilot_interface.h

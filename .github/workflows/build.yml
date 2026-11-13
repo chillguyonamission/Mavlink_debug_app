@@ -16,12 +16,12 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential cmake ninja-build pkg-config qt6-base-dev libgl-dev libpcap-dev \
-            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libgstreamer-rtsp-server-1.0-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libgstrtspserver-1.0-dev \
             gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav
       - name: Build
         run: |
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
-          cmake --build build
+          cmake --build build -- -k 0
       - name: Test
         run: ctest --test-dir build --output-on-failure
 
@@ -70,7 +70,7 @@ jobs:
       - name: Build
         run: |
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DPKG_CONFIG_EXECUTABLE="%PKG_CONFIG_EXE%"
-          cmake --build build
+          cmake --build build -- -k 0
         shell: cmd
       - name: Test
         run: ctest --test-dir build --output-on-failure
