@@ -12,11 +12,16 @@
 #include <QPushButton>
 #include <QtTest>
 
+#include <thread>
+
 class TestVideo : public QObject
 {
     Q_OBJECT
     GstRTSPServer *m_server = nullptr;
     guint m_sourceId = 0;
+    GMainContext *m_ctx = nullptr;  // the server's own loop: Qt's event loop runs GLib's default context only on Linux
+    GMainLoop *m_loop = nullptr;
+    std::thread m_loopThread;
     QString m_url;
 
 private slots:
@@ -32,15 +37,24 @@ private slots:
                                              "! openh264enc ! rtph264pay name=pay0 pt=96 config-interval=1 )");
         gst_rtsp_media_factory_set_shared(f, TRUE);
         gst_rtsp_mount_points_add_factory(gst_rtsp_server_get_mount_points(m_server), "/payload", f);
-        m_sourceId = gst_rtsp_server_attach(m_server, nullptr);  // default GLib context, which Qt's event loop runs
+        m_ctx = g_main_context_new();
+        m_loop = g_main_loop_new(m_ctx, FALSE);
+        m_sourceId = gst_rtsp_server_attach(m_server, m_ctx);
         QVERIFY(m_sourceId);
+        m_loopThread = std::thread(g_main_loop_run, m_loop);
         m_url = QStringLiteral("rtsp://127.0.0.1:%1/payload").arg(gst_rtsp_server_get_bound_port(m_server));
     }
 
     void cleanupTestCase()
     {
-        if (m_sourceId) g_source_remove(m_sourceId);
+        if (m_loopThread.joinable()) {
+            g_main_loop_quit(m_loop);
+            m_loopThread.join();
+        }
+        if (m_sourceId) g_source_destroy(g_main_context_find_source_by_id(m_ctx, m_sourceId));
         g_object_unref(m_server);
+        g_main_loop_unref(m_loop);
+        g_main_context_unref(m_ctx);
     }
 
     void urlValidation()

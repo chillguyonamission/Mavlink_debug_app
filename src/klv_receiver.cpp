@@ -8,7 +8,9 @@
 #include <gst/video/video.h>
 
 #ifdef _WIN32
+#include <winsock2.h>
 #include <ws2tcpip.h>
+#include <iphlpapi.h>  // if_nametoindex
 #else
 #include <arpa/inet.h>
 #include <net/if.h>
@@ -80,10 +82,8 @@ QString KlvReceiver::validate(const Config &c)
         return QStringLiteral("\"%1\" is not an IPv4 address").arg(c.address);
     if (c.port < 1 || c.port > 65535)
         return QStringLiteral("Port must be 1 to 65535");
-#ifndef _WIN32
     if (!c.iface.isEmpty() && if_nametoindex(c.iface.toUtf8().constData()) == 0)
         return QStringLiteral("No network interface named \"%1\"").arg(c.iface);
-#endif
     // What this pipeline can depayload: anything else would never negotiate and would only look like silence
     if (c.media != QLatin1String("video"))
         return QStringLiteral("RTP media must be \"video\"");

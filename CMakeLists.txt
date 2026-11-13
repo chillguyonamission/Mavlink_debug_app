@@ -81,6 +81,9 @@ target_compile_definitions(appcore PRIVATE
 add_library(appgui STATIC src/theme.cpp src/main_window.cpp src/inspector_widget.cpp src/stats_widget.cpp src/payload_pages.cpp
     src/video_player.cpp src/video_page.cpp src/klv_receiver.cpp src/klv_page.cpp src/splash.cpp)
 target_link_libraries(appgui PUBLIC Qt6::Widgets appcore PRIVATE PkgConfig::GSTVIDEO)
+if(WIN32)
+    target_link_libraries(appgui PRIVATE iphlpapi)  # if_nametoindex
+endif()
 target_compile_options(appgui PRIVATE ${APP_WARNINGS})
 
 add_executable(mavlink_debug_app src/main.cpp)
