@@ -351,15 +351,19 @@ index fc2bbc7..f8e6362 100644
  }
  
 diff --git a/libs/third-party/mavlink/src/udp_port.cpp b/libs/third-party/mavlink/src/udp_port.cpp
-index 582a054..91c7f66 100644
+index 582a054..5f93d3a 100644
 --- a/libs/third-party/mavlink/src/udp_port.cpp
 +++ b/libs/third-party/mavlink/src/udp_port.cpp
-@@ -55,6 +55,15 @@
+@@ -55,6 +55,19 @@
  // ------------------------------------------------------------------------------
  
  #include "udp_port.h"
 +#ifdef _WIN32
 +#include <timeapi.h>
++#include <mstcpip.h>
++#ifndef SIO_UDP_CONNRESET  // missing from MinGW headers
++#define SIO_UDP_CONNRESET _WSAIOW(IOC_VENDOR, 12)
++#endif
 +#define close_socket closesocket
 +#define SHUT_RD SD_RECEIVE
 +#define socket_errno() WSAGetLastError()
@@ -370,7 +374,7 @@ index 582a054..91c7f66 100644
  
  #define UDP_SERVER	0
  #define UDP_CLIENT  1
-@@ -88,9 +97,10 @@ UDP_Port::
+@@ -88,9 +101,10 @@ UDP_Port::
  ~UDP_Port()
  {
  	// App patch: stop() only shuts down; the fd is released here, after the I/O threads are joined
@@ -384,7 +388,7 @@ index 582a054..91c7f66 100644
  }
  
  void
-@@ -105,15 +115,7 @@ initialize_defaults()
+@@ -105,15 +119,7 @@ initialize_defaults()
  
  	is_open = false;
  	debug = false;
@@ -401,7 +405,7 @@ index 582a054..91c7f66 100644
  }
  
  
-@@ -158,7 +160,10 @@ read_message(std::queue<mavlink_message_t> &message)
+@@ -158,7 +164,10 @@ read_message(std::queue<mavlink_message_t> &message)
  	// Couldn't read from port
  	else
  	{
@@ -413,7 +417,7 @@ index 582a054..91c7f66 100644
  	}
  
  	// Done!
-@@ -183,7 +188,7 @@ write_message(const mavlink_message_t &message)
+@@ -183,7 +192,7 @@ write_message(const mavlink_message_t &message)
  	// Write buffer to UDP port, locks port while writing
  	int bytesWritten = _write_port(buf,len);
  	if(bytesWritten < 0){
@@ -422,7 +426,7 @@ index 582a054..91c7f66 100644
  	}
  
  	return bytesWritten;
-@@ -204,13 +209,35 @@ start()
+@@ -204,13 +213,39 @@ start()
  	//   OPEN PORT
  	// --------------------------------------------------------------------------
  
@@ -454,12 +458,16 @@ index 582a054..91c7f66 100644
 +		// shutdown() does not reliably wake a blocked recvfrom() here; a timeout lets stop() be noticed
 +		DWORD timeout_ms = 200;
 +		setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char *)&timeout_ms, sizeof(timeout_ms));
++		// An ICMP port-unreachable for an earlier send would make the next recvfrom() fail (WSAECONNRESET); Linux ignores it
++		BOOL report_reset = FALSE;
++		DWORD unused = 0;
++		WSAIoctl(sock, SIO_UDP_CONNRESET, &report_reset, sizeof(report_reset), NULL, 0, &unused, NULL, NULL);
 +	}
 +#endif
  
  #if (UDP_MODE == UDP_SERVER)
  	printf("\x1b[32m %s : %d \t Set UDP_Port as UDP_SERVER\r\n\x1b[0m",__func__,__LINE__);
-@@ -228,8 +255,8 @@ start()
+@@ -228,8 +263,8 @@ start()
  	if (bind(sock, (struct sockaddr *) &addr, sizeof(struct sockaddr)))
  	{
  		perror("error bind failed");
@@ -470,7 +478,7 @@ index 582a054..91c7f66 100644
  		throw EXIT_FAILURE;
  	}
  	// --------------------------------------------------------------------------
-@@ -295,11 +322,11 @@ _read_port(uint8_t &cp)
+@@ -295,11 +330,11 @@ _read_port(uint8_t &cp)
  	socklen_t len;
  
  	// Lock
@@ -484,7 +492,7 @@ index 582a054..91c7f66 100644
  		if (result > 0 && observer) observer(0, (const uint8_t *)buff, result, &addr, 0); // App patch
  		
  		// printf("%s %d \n", __func__, result);
-@@ -315,7 +342,7 @@ _read_port(uint8_t &cp)
+@@ -315,7 +350,7 @@ _read_port(uint8_t &cp)
  	#endif
  
  	// Unlock
@@ -493,7 +501,7 @@ index 582a054..91c7f66 100644
  
  	return result;
  }
-@@ -338,9 +365,11 @@ _write_port(char *buf, unsigned len)
+@@ -338,9 +373,11 @@ _write_port(char *buf, unsigned len)
  		addr.sin_port = htons(tx_port);
  		bytesWritten = sendto(sock, buf, len, 0, (struct sockaddr*)&addr, sizeof(struct sockaddr_in));
  		if (observer) { // App patch
