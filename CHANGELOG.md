@@ -7,6 +7,15 @@ Newest first. "Tested" means the hardware-free CTest suite unless a line says ha
 
 ### Added
 
+- **DIAGNOSE view.** Health check (link, each payload part's heartbeat and state, decoded gimbal failure flags, model,
+  payload value stream, frame and send errors, sequence gaps, failed commands), a read-only network check (PC
+  adapters on the payload's subnet, its TCP services, its software list from the web app), an SDK update check
+  against GitHub, and a text report. Tested with unit tests and a loopback network check; not yet on a payload.
+- **Web settings tab:** the payload's web app inside the app (Qt WebEngine), or **Open in browser** without it. The
+  pages were checked in Qt WebEngine on a VIO (Setting App 2.7.0.12) before this was built; the tab itself has not
+  run against a payload yet.
+- **Portable packages from CI:** Windows zip (Qt, GStreamer plugins, MAVLink XML) and a Linux AppImage.
+
 - **Windows build (in progress).** The SDK is ported by `patches/payloadsdk-windows.patch`: Winsock instead of BSD sockets,
   `std::thread`/`std::mutex` instead of pthread, 1 ms timer resolution for its polling loops. UART control is Linux-only.
   Network capture on Windows needs the user to install Npcap (it may not be bundled); without it the capture tools say so.

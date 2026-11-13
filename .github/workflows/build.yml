@@ -24,6 +24,13 @@ jobs:
           cmake --build build -- -k 0
       - name: Test
         run: ctest --test-dir build --output-on-failure
+      - name: AppImage
+        run: scripts/package-linux.sh build dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-appimage
+          path: dist/*.AppImage
+          if-no-files-found: error
 
   windows:
     runs-on: windows-2022
@@ -94,6 +101,27 @@ jobs:
           if ($missing) { Write-Output "Missing GStreamer elements: $missing" }
       - name: Test
         run: ctest --test-dir build --output-on-failure
+      - name: Portable zip
+        shell: pwsh
+        run: scripts\package-windows.ps1 -Build build -Out dist
+      - name: Smoke test the portable folder
+        shell: pwsh
+        run: |
+          # Run from the zip's contents with no Qt or GStreamer on PATH, as on a customer-site laptop
+          $dir = Get-ChildItem dist -Directory | Select-Object -First 1
+          $env:PATH = "C:\Windows\system32;C:\Windows"
+          $env:QT_QPA_PLATFORM = "offscreen"
+          $p = Start-Process "$($dir.FullName)\mavlink_debug_app.exe" -PassThru -RedirectStandardError smoke.err
+          Start-Sleep 15
+          if ($p.HasExited) { Get-Content smoke.err; throw "the app exited with code $($p.ExitCode)" }
+          $p.Kill()
+          & "$($dir.FullName)\mavlink_capture.exe" --ip 127.0.0.1 --seconds 2 --out smoke  # nothing answers: it must still run and exit
+          if ($LASTEXITCODE) { throw "mavlink_capture exited with $LASTEXITCODE" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-portable
+          path: dist/*.zip
+          if-no-files-found: error
       - name: Video test logs (on failure)
         if: failure()
         shell: pwsh

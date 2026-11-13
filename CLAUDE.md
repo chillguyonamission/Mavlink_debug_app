@@ -47,9 +47,17 @@ results, acceptance checklist, limitations). For setup on native Ubuntu, see
   longer changes combos. Tested only offscreen against the fake payload. The real app ran live on a VIO with **3.1.9.24**: heartbeat, RTP/TS and KLV work.
   That unit has RTSP off, and sends KLV over UDP unicast to `192.168.55.100:8554`, so the Address must be that, not the default multicast group.
 
+- 2026-11-13 (branch `diagnostic-tool`): becoming a portable Windows + Linux diagnostic tool.
+  - PayloadSDK at `2021d9f`; reboot fix (streams re-requested after stale). Not re-verified on hardware (user skipped it).
+  - Windows port: `patches/payloadsdk-windows.patch` (applied after the observer patch), CI on Ubuntu + Windows (MSVC).
+  - DIAGNOSE view (health check, network check, SDK update check, report, Web settings tab) and CI packages
+    (Windows zip, AppImage). All tested only in CI and against loopback, not on a payload or a Windows PC.
+  - Windows traps: `windows.h` defines `far`/`near`; Qt does not run GLib's default main context on Windows (the app
+    polls GStreamer buses, so only tests were affected).
+
 ## Next steps
 
-1. Native build: `scripts/build.sh` should report 13/13 tests passing. If it fails with a `CMakeCache.txt` path error, the
+1. Native build: `scripts/build.sh` should report 14/14 tests passing. If it fails with a `CMakeCache.txt` path error, the
    repository moved: run `cmake --fresh -S . -B build`. Build into `build/` so the user's binary has the work.
 2. On native Linux, verify RTSP over UDP and live network capture (both impossible under WSL2).
    `ffmpeg -rtsp_transport udp` got only 3 frames on 2026-10-23 (TCP fine). The laptop then had two

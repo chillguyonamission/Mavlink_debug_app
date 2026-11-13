@@ -74,6 +74,8 @@ scripts/build.sh --run        # checks dependencies, builds, runs the tests, sta
 |---|---|
 | `third_party/PayloadSdk` | Gremsy PayloadSDK, git submodule pinned to `payloadsdk_v3` @ `2021d9f` (GPL-3.0) |
 | `patches/payloadsdk-transport-observer.patch` | SDK modification: TX/RX observer and the `sdkQuit()` hang fix; applied automatically by CMake |
+| `src/diagnostics.*`, `src/diagnostics_page.*`, `src/web_settings_page.*` | DIAGNOSE view: health checks, network check, SDK update check, report, payload web app |
+| `scripts/package-*.sh/.ps1`, `packaging/` | AppImage and Windows portable zip |
 | `patches/payloadsdk-windows.patch` | SDK port to Windows (Winsock, `std::thread`/`std::mutex` instead of pthread); applied after the observer patch |
 | `.github/workflows/build.yml` | CI: build and test on Ubuntu 24.04 and on Windows (MSVC, Qt 6.8, GStreamer 1.26) |
 | `src/mavlink_frame.*` | Qt-free MAVLink framing, CRC validation, and field decoding |
@@ -133,6 +135,18 @@ cmake --install build --prefix ~/.local     # bin/mavlink_debug_app, bin/mavlink
 
 The installed binaries read the MAVLink XML from `message_definitions/` next to themselves (override
 with `MAVLINK_XML_DIR`). Build-tree binaries fall back to the SDK copy.
+
+### Portable packages
+
+CI builds both on every push (GitHub → Actions → the run → Artifacts):
+
+- **Windows:** `MavlinkDebugApp-<version>-windows-x64.zip`. Unzip anywhere (also a USB stick or a cloud folder) and run
+  `mavlink_debug_app.exe`. Qt, GStreamer and the MAVLink definitions are inside. Network capture needs
+  [Npcap](https://npcap.com) installed on that PC; everything else works without it. See `docs/INSTALL_WINDOWS.md`.
+- **Linux:** `MavlinkDebugApp-<version>-x86_64.AppImage` for Ubuntu 24.04 or newer. `chmod +x` and run; it needs
+  `libfuse2t64` (`sudo apt install libfuse2t64`) or `--appimage-extract-and-run`.
+
+To build them yourself: `scripts/package-linux.sh` or `scripts\package-windows.ps1` after a build.
 
 ## Run
 
@@ -219,6 +233,34 @@ The status only reports what has actually been observed on the link:
 | MAVLink traffic, no heartbeat | Valid frames are arriving, but no HEARTBEAT within the timeout. |
 | Heartbeat received | A HEARTBEAT arrived within the timeout. "Heartbeats from" lists every sysid/compid with its age. |
 | Stale | Traffic was seen earlier, but nothing within the timeout. The SDK keeps sending, so the link resumes when the payload returns. |
+
+## Diagnose (checking a faulty payload)
+
+The **DIAGNOSE** view has two tabs.
+
+**Health check** refreshes every second from what the link has already received; it sends nothing:
+
+| Area | Checks |
+|---|---|
+| Link | Connection state, with the likely cause when nothing or no valid MAVLink arrives |
+| Components | A fresh HEARTBEAT from the payload core, camera and gimbal, and each one's `MAV_STATE` (CRITICAL/EMERGENCY fail) |
+| Gimbal | `failure_flags` decoded by name (e.g. `MOTOR_ERROR`), and the mode |
+| Payload | Reported model against the selected one; software version if reported |
+| Streams | Whether the payload's DEBUG values still update (they stop after a reboot until requested again) |
+| Data | Bad CRC, truncated and garbage bytes, send errors, app capture drops, sequence gaps |
+| Commands | Commands that were rejected, not answered or not sent |
+
+Buttons:
+- **Run network check** (read-only): which of this PC's adapters are on the payload's subnet (none, or several,
+  is the usual cause of "connected but nothing arrives"); TCP 8000 (web app), 8554 (RTSP) and 22 (SSH); and the
+  payload's software list from its web app (`/system-info`, `/update-ota`).
+- **Check SDK update:** asks GitHub whether `payloadsdk_v3` has commits this build does not include. Updating means a
+  new app build.
+- **Export report…:** saves every row with the date, app, PC, payload and link state as a text file for a support case.
+
+**Web settings** shows the payload's own web app (`http://<ip>:8000/`): settings, files, firmware update. It runs with no
+saved cookies or cache, and asks where to save downloads. Its links act on the payload (for example, file delete
+links are plain GETs). Builds without Qt WebEngine show **Open in browser** instead.
 
 ## MAVLink Inspector
 
