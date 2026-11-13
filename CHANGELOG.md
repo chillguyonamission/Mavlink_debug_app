@@ -10,7 +10,9 @@ Newest first. "Tested" means the hardware-free CTest suite unless a line says ha
 - **Windows build (in progress).** The SDK is ported by `patches/payloadsdk-windows.patch`: Winsock instead of BSD sockets,
   `std::thread`/`std::mutex` instead of pthread, 1 ms timer resolution for its polling loops. UART control is Linux-only.
   Network capture on Windows needs the user to install Npcap (it may not be bundled); without it the capture tools say so.
-  CI builds and tests on Ubuntu 24.04 and Windows. Nothing has run on a Windows PC with a payload yet.
+  CI builds and tests on Ubuntu 24.04 (13/13) and Windows Server 2022 with MSVC (12/12; the libpcap test is Linux-only).
+  KLV settings list Windows adapters by their system names (e.g. `ethernet_32769`); whether GStreamer's multicast
+  interface option accepts them is untested. Nothing has run on a Windows PC with a payload yet.
 
 ### Changed
 
