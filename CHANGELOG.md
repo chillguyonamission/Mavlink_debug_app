@@ -5,6 +5,13 @@ Newest first. "Tested" means the hardware-free CTest suite unless a line says ha
 
 ## Unreleased
 
+### Added
+
+- **Windows build (in progress).** The SDK is ported by `patches/payloadsdk-windows.patch`: Winsock instead of BSD sockets,
+  `std::thread`/`std::mutex` instead of pthread, 1 ms timer resolution for its polling loops. UART control is Linux-only.
+  Network capture on Windows needs the user to install Npcap (it may not be bundled); without it the capture tools say so.
+  CI builds and tests on Ubuntu 24.04 and Windows. Nothing has run on a Windows PC with a payload yet.
+
 ### Changed
 
 - **PayloadSDK** moved from `fba3c70` to `2021d9f` (23 upstream commits). The app's SDK patch applies unchanged. Read-only

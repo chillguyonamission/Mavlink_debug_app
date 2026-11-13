@@ -1,6 +1,10 @@
 #include "link_health.h"
 
+#ifdef _WIN32
+#include <ws2tcpip.h>
+#else
 #include <arpa/inet.h>
+#endif
 
 LinkState evaluateLink(const LinkObservations &o, qint64 nowMs, qint64 timeoutMs)
 {

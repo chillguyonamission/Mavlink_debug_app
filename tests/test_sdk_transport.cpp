@@ -2,6 +2,7 @@
 // Verifies the observer sees real TX/RX traffic and that sdkQuit() cannot hang on a silent peer.
 #include "payloadSdkInterface.h"
 #include "mavlink_frame.h"
+#include "test_socket.h"
 
 #include <atomic>
 #include <chrono>
@@ -14,15 +15,15 @@ using Clock = std::chrono::steady_clock;
 
 int main()
 {
-    int fake = socket(AF_INET, SOCK_DGRAM, 0);
+    testSocketInit();
+    test_socket_t fake = socket(AF_INET, SOCK_DGRAM, 0);
     sockaddr_in fakeAddr{};
     fakeAddr.sin_family = AF_INET;
     fakeAddr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     socklen_t al = sizeof fakeAddr;
     CHECK(bind(fake, (sockaddr *)&fakeAddr, sizeof fakeAddr) == 0);
     getsockname(fake, (sockaddr *)&fakeAddr, &al);
-    timeval tv{3, 0};
-    setsockopt(fake, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
+    setRecvTimeout(fake, 3000);
     const int fakePort = ntohs(fakeAddr.sin_port);
 
     for (int round = 0; round < 2; ++round) {  // second round = reconnect after disconnect
@@ -43,7 +44,7 @@ int main()
         uint8_t buf[512];
         sockaddr_in app{};
         socklen_t appLen = sizeof app;
-        int n = recvfrom(fake, buf, sizeof buf, 0, (sockaddr *)&app, &appLen);
+        int n = recvfrom(fake, (char *)buf, sizeof buf, 0, (sockaddr *)&app, &appLen);
         CHECK(n > 0);
         if (n > 0) {
             auto frames = parseDatagram(buf, size_t(n));
@@ -55,7 +56,7 @@ int main()
         mavlink_message_t m;
         mavlink_msg_heartbeat_pack_chan(1, MAV_COMP_ID_GIMBAL, MAVLINK_COMM_0, &m, MAV_TYPE_GIMBAL, MAV_AUTOPILOT_INVALID, 0, 0, MAV_STATE_ACTIVE);
         uint8_t out[MAVLINK_MAX_PACKET_LEN];
-        sendto(fake, out, mavlink_msg_to_send_buffer(out, &m), 0, (sockaddr *)&app, appLen);
+        sendto(fake, (const char *)out, mavlink_msg_to_send_buffer(out, &m), 0, (sockaddr *)&app, appLen);
         for (int i = 0; i < 100 && rx == 0; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(10));
         CHECK(rx > 0);
         CHECK(rxPeerPort == fakePort);
@@ -69,7 +70,7 @@ int main()
         printf("round %d: tx=%d rx=%d quit=%lld ms\n", round, tx.load(), rx.load(), (long long)ms);
         CHECK(ms < 2000);
     }
-    close(fake);
+    closeTestSocket(fake);
 
     printf(failures ? "%d check(s) failed\n" : "all checks passed\n", failures);
     return failures ? 1 : 0;

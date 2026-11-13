@@ -73,7 +73,9 @@ scripts/build.sh --run        # checks dependencies, builds, runs the tests, sta
 | Path | Contents |
 |---|---|
 | `third_party/PayloadSdk` | Gremsy PayloadSDK, git submodule pinned to `payloadsdk_v3` @ `2021d9f` (GPL-3.0) |
-| `patches/payloadsdk-transport-observer.patch` | The only SDK modification; applied automatically by CMake |
+| `patches/payloadsdk-transport-observer.patch` | SDK modification: TX/RX observer and the `sdkQuit()` hang fix; applied automatically by CMake |
+| `patches/payloadsdk-windows.patch` | SDK port to Windows (Winsock, `std::thread`/`std::mutex` instead of pthread); applied after the observer patch |
+| `.github/workflows/build.yml` | CI: build and test on Ubuntu 24.04 and on Windows (MSVC, Qt 6.8, GStreamer 1.26) |
 | `src/mavlink_frame.*` | Qt-free MAVLink framing, CRC validation, and field decoding |
 | `src/payload_link.*` | The single owner of the SDK connection; moves frames from the SDK's I/O threads to the GUI thread |
 | `src/link_health.*` | Pure logic: endpoint validation and link-state evaluation |

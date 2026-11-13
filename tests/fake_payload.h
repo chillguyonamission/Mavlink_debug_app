@@ -5,15 +5,14 @@
 
 #include <QByteArray>
 
-#include <arpa/inet.h>
-#include <sys/socket.h>
-#include <unistd.h>
+#include "test_socket.h"
 
 class FakePayload
 {
 public:
     FakePayload()
     {
+        testSocketInit();
         fd = socket(AF_INET, SOCK_DGRAM, 0);
         sockaddr_in a{};
         a.sin_family = AF_INET;
@@ -22,19 +21,18 @@ public:
         bind(fd, (sockaddr *)&a, sizeof a);
         getsockname(fd, (sockaddr *)&a, &l);
         port = ntohs(a.sin_port);
-        timeval tv{3, 0};
-        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
+        setRecvTimeout(fd, 3000);
     }
-    ~FakePayload() { close(fd); }
+    ~FakePayload() { closeTestSocket(fd); }
 
     // Waits for the app's first datagram (its heartbeat) to learn the app's ephemeral endpoint.
     bool learnAppEndpoint()
     {
         uint8_t b[512];
         socklen_t l = sizeof app;
-        return recvfrom(fd, b, sizeof b, 0, (sockaddr *)&app, &l) > 0;
+        return recvfrom(fd, (char *)b, sizeof b, 0, (sockaddr *)&app, &l) > 0;
     }
-    void send(const QByteArray &d) { sendto(fd, d.constData(), size_t(d.size()), 0, (sockaddr *)&app, sizeof app); }
+    void send(const QByteArray &d) { sendto(fd, d.constData(), int(d.size()), 0, (sockaddr *)&app, sizeof app); }
     void send(const mavlink_message_t &m)
     {
         uint8_t b[MAVLINK_MAX_PACKET_LEN];
@@ -52,14 +50,14 @@ public:
     {
         std::vector<MavFrame> out;
         uint8_t b[2048];
-        ssize_t n;
-        while ((n = recv(fd, b, sizeof b, MSG_DONTWAIT)) > 0)
+        int n;
+        while ((n = recvNow(fd, b, sizeof b)) > 0)
             for (MavFrame &f : parseDatagram(b, size_t(n)))
                 if (f.status == MavFrame::Ok) out.push_back(std::move(f));
         return out;
     }
 
-    int fd;
+    test_socket_t fd;
     int port;
     sockaddr_in app{};
 };

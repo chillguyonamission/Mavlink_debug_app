@@ -1,0 +1,490 @@
+diff --git a/libs/CMakeLists.txt b/libs/CMakeLists.txt
+index eb7e8df..56de2b0 100644
+--- a/libs/CMakeLists.txt
++++ b/libs/CMakeLists.txt
+@@ -18,8 +18,20 @@ file(GLOB_RECURSE SOURCES
+             )
+ 
+ # PayloadSDK library build
++if(WIN32)  # serial_port uses termios, mavlink_ftp uses dirent; neither exists on Windows
++    list(FILTER SOURCES EXCLUDE REGEX "(serial_port|mavlink_ftp)\\.cpp$")
++endif()
+ add_library(${PROJECT_NAME} STATIC ${SOURCES}) # Static by default
++if(WIN32)
++    target_link_libraries(${PROJECT_NAME} ws2_32 winmm)
++    # winsock2.h pulls in windows.h: keep its min/max macros out of users' code
++    target_compile_definitions(${PROJECT_NAME} PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN _USE_MATH_DEFINES _WINSOCK_DEPRECATED_NO_WARNINGS _CRT_SECURE_NO_WARNINGS)
++    if(MSVC)
++        target_compile_options(${PROJECT_NAME} PRIVATE /permissive-)  # 'not'/'and' keywords
++    endif()
++else()
+ target_link_libraries(${PROJECT_NAME})
++endif()
+ target_include_directories(${PROJECT_NAME}
+     PUBLIC 
+             ${CMAKE_CURRENT_SOURCE_DIR}
+diff --git a/libs/payloadSdkInterface.cpp b/libs/payloadSdkInterface.cpp
+index 6250b4b..1f35ec4 100644
+--- a/libs/payloadSdkInterface.cpp
++++ b/libs/payloadSdkInterface.cpp
+@@ -89,7 +89,12 @@ PayloadSdkInterface::
+ sdkInitConnection(){
+     /* Port for connect with payload */
+     if(payload_ctrl_type == CONTROL_UART){
++#ifdef _WIN32
++        SDK_LOG("UART control is not supported on Windows");
++        return false;
++#else
+         port = new Serial_Port(payload_uart_port, payload_uart_baud);
++#endif
+     }else if(payload_ctrl_type == CONTROL_UDP)
+         port = new UDP_Port(udp_ip_target, udp_port_target);
+     else{
+@@ -133,16 +138,17 @@ sdkQuit(){
+     }
+     if(recv_thread_started){
+         payload_interface->handle_quit(0);
+-        pthread_join(thrd_recv, NULL);
++        thrd_recv.join();
+     }
+ }
+ 
+ bool 
+ PayloadSdkInterface::
+ all_threads_init(){
+-    int rc = pthread_create(&thrd_recv, NULL, &start_thrd_received_msg, this);
+-    if (rc){
+-        std::cout << "\nError: Can not create thread!" << rc << std::endl;
++    try {
++        thrd_recv = std::thread(start_thrd_received_msg, this);
++    } catch (const std::system_error &e) {
++        std::cout << "\nError: Can not create thread!" << e.what() << std::endl;
+         return false;
+     }
+     recv_thread_started = true; // App patch
+diff --git a/libs/payloadSdkInterface.h b/libs/payloadSdkInterface.h
+index b316a76..cf4c12e 100644
+--- a/libs/payloadSdkInterface.h
++++ b/libs/payloadSdkInterface.h
+@@ -378,8 +378,7 @@ public:
+ private:
+     Autopilot_Interface* payload_interface = nullptr;
+     
+-    pthread_t thrd_recv;
+-    pthread_t thrd_request_params;
++    std::thread thrd_recv;
+ 
+     uint8_t payload_ctrl_type = CONTROL_METHOD;
+     Generic_Port *port = nullptr;
+diff --git a/libs/payloadsdk.h b/libs/payloadsdk.h
+index a53971c..f5a0344 100644
+--- a/libs/payloadsdk.h
++++ b/libs/payloadsdk.h
+@@ -5,7 +5,9 @@
+ #include <ardupilotmega/mavlink.h>
+ #include <signal.h>
+ #include "autopilot_interface.h"
++#ifndef _WIN32
+ #include "serial_port.h"
++#endif
+ #include "udp_port.h"
+ 
+ #include "payload_enum.h"
+diff --git a/libs/third-party/mavlink/include/autopilot_interface.h b/libs/third-party/mavlink/include/autopilot_interface.h
+index 080632e..3b7d2dd 100644
+--- a/libs/third-party/mavlink/include/autopilot_interface.h
++++ b/libs/third-party/mavlink/include/autopilot_interface.h
+@@ -61,9 +61,7 @@
+ #include <iostream>
+ #include <signal.h>
+ #include <time.h>
+-#include <sys/time.h>
+-#include <pthread.h> // This uses POSIX Threads
+-#include <unistd.h>  // UNIX standard function definitions
++#include <thread>
+ #include <mutex>
+ #include <queue>
+ 
+@@ -236,17 +234,17 @@ protected:
+ 
+ 	bool time_to_exit;
+ 
+-	pthread_t read_tid;
+-	pthread_t write_tid;
++	std::thread read_tid;
++	std::thread write_tid;
+ 
+ 	void read_thread();
+ 	void write_thread(void);
+ 
+ 	// mavlink message queue
+-	pthread_mutex_t read_queue_mutex = PTHREAD_MUTEX_INITIALIZER;
++	std::mutex read_queue_mutex;
+ 	std::queue<mavlink_message_t> m_mav_message;
+ 
+-	pthread_mutex_t write_queue_mutex = PTHREAD_MUTEX_INITIALIZER;
++	std::mutex write_queue_mutex;
+ 	std::queue<mavlink_message_t> m_mav_write_message;
+ 
+ 	int cnt=0;
+diff --git a/libs/third-party/mavlink/include/generic_port.h b/libs/third-party/mavlink/include/generic_port.h
+index 8532a02..2766b89 100644
+--- a/libs/third-party/mavlink/include/generic_port.h
++++ b/libs/third-party/mavlink/include/generic_port.h
+@@ -59,6 +59,13 @@
+ #include <common/mavlink.h>
+ #include <queue>
+ #include <functional>
++#ifdef _WIN32
++#include <chrono>
++#include <thread>
++inline int usleep(unsigned int usec) { std::this_thread::sleep_for(std::chrono::microseconds(usec)); return 0; }
++#else
++#include <unistd.h>
++#endif
+ 
+ struct sockaddr_in;
+ 
+diff --git a/libs/third-party/mavlink/include/udp_port.h b/libs/third-party/mavlink/include/udp_port.h
+index 8a7453f..668185e 100644
+--- a/libs/third-party/mavlink/include/udp_port.h
++++ b/libs/third-party/mavlink/include/udp_port.h
+@@ -60,17 +60,25 @@
+ #include <stdio.h>
+ #include <errno.h>
+ #include <string.h>
+-#include <pthread.h> // This uses POSIX Threads
++#include <mutex>
++#include <stdlib.h>
++#include <time.h>
++#ifdef _WIN32
++#include <winsock2.h>
++#include <ws2tcpip.h>
++typedef SOCKET udp_socket_t;
++#define UDP_BAD_SOCKET INVALID_SOCKET
++#else
+ #include <sys/socket.h>
+ #include <sys/types.h>
+ #include <netinet/in.h>
+ #include <unistd.h>
+-#include <stdlib.h>
+ #include <fcntl.h>
+-#include <time.h>
+ #include <sys/time.h>
+-#include <time.h>
+ #include <arpa/inet.h>
++typedef int udp_socket_t;
++#define UDP_BAD_SOCKET (-1)
++#endif
+ #include <stdbool.h>
+ 
+ // #include <common/mavlink.h>
+@@ -128,7 +136,7 @@ public:
+ private:
+ 
+ 	mavlink_status_t lastStatus;
+-	pthread_mutex_t  lock;
++	std::mutex       lock;
+ 
+ 	void initialize_defaults();
+ 
+@@ -140,8 +148,9 @@ private:
+ 	const char *target_ip;
+ 	int rx_port;
+ 	int tx_port;
+-	int sock;
++	udp_socket_t sock;
+ 	bool is_open;
++	bool wsa_started = false;
+ 
+ 	int  _read_port(uint8_t &cp);
+ 	int _write_port(char *buf, unsigned len);
+diff --git a/libs/third-party/mavlink/src/autopilot_interface.cpp b/libs/third-party/mavlink/src/autopilot_interface.cpp
+index fc2bbc7..f8e6362 100644
+--- a/libs/third-party/mavlink/src/autopilot_interface.cpp
++++ b/libs/third-party/mavlink/src/autopilot_interface.cpp
+@@ -53,6 +53,7 @@
+ // ------------------------------------------------------------------------------
+ 
+ #include "autopilot_interface.h"
++#include <chrono>
+ 
+ // extern from mavlink_helper.h
+ mavlink_status_t m_mavlink_status[MAVLINK_COMM_NUM_BUFFERS];
+@@ -64,17 +65,14 @@ mavlink_message_t m_mavlink_buffer[MAVLINK_COMM_NUM_BUFFERS];
+ uint64_t
+ get_time_usec()
+ {
+-	static struct timeval _time_stamp;
+-	gettimeofday(&_time_stamp, NULL);
+-	return _time_stamp.tv_sec*1000000 + _time_stamp.tv_usec;
++	return std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+ }
+ 
+ uint64_t
+ get_time_msec()
+ {
+-	static struct timeval _time_stamp;
+-	gettimeofday(&_time_stamp, NULL);
+-	return _time_stamp.tv_sec*1000 + _time_stamp.tv_usec;
++	uint64_t us = get_time_usec();
++	return us / 1000000 * 1000 + us % 1000000; // as upstream (sec*1000 + usec); unused by the SDK
+ }
+ 
+ // ----------------------------------------------------------------------------------
+@@ -95,8 +93,6 @@ Autopilot_Interface(Generic_Port *port_, int sys_id, int comp_id, int version, i
+ 	control_status = 0;      // whether the autopilot is in offboard control mode
+ 	time_to_exit   = false;  // flag to signal thread exit
+ 
+-	read_tid  = 0; // read thread id
+-	write_tid = 0; // write thread id
+ 
+ 	system_id    = 1; // system id
+ 	autopilot_id = 25; // autopilot component id
+@@ -146,13 +142,13 @@ read_messages()
+ 		success = port->read_message(queue_message);
+ 
+ 		if(success){
+-			pthread_mutex_lock(&read_queue_mutex);
++			read_queue_mutex.lock();
+ 			while(!queue_message.empty()){
+ 				// printf("got msg id: %d\n", queue_message.front().msgid);
+ 				m_mav_message.push(queue_message.front());
+ 				queue_message.pop();
+ 			}
+-			pthread_mutex_unlock(&read_queue_mutex);
++			read_queue_mutex.unlock();
+ 		}
+ 		
+ 		// give the write thread time to use the port
+@@ -210,8 +206,7 @@ start()
+ 
+ 	printf("START READ THREAD \n");
+ 
+-	result = pthread_create( &read_tid, NULL, &start_autopilot_interface_read_thread, this );
+-	if ( result ) throw result;
++	read_tid = std::thread(start_autopilot_interface_read_thread, this);
+ 
+ 
+ 	// --------------------------------------------------------------------------
+@@ -258,8 +253,7 @@ start()
+ 	// --------------------------------------------------------------------------
+ 	printf("START WRITE THREAD \n");
+ 
+-	result = pthread_create( &write_tid, NULL, &start_autopilot_interface_write_thread, this );
+-	if ( result ) throw result;
++	write_tid = std::thread(start_autopilot_interface_write_thread, this);
+ 
+ 	// wait for it to be started
+ 	while ( not writing_status )
+@@ -288,8 +282,8 @@ stop()
+ 	time_to_exit = true;
+ 
+ 	// wait for exit
+-	pthread_join(read_tid ,NULL);
+-	pthread_join(write_tid,NULL);
++	if (read_tid.joinable()) read_tid.join();
++	if (write_tid.joinable()) write_tid.join();
+ 
+ 	// now the read and write threads are closed
+ 	printf("\n");
+@@ -399,7 +393,7 @@ write_thread(void)
+ 			w_heartbeat();
+ 			// printf("write hb %d\n", tick++);
+ 		}else{
+-			pthread_mutex_lock(&write_queue_mutex);
++			write_queue_mutex.lock();
+ 			if(m_mav_write_message.size() > 0){
+ 				int len = write_message(m_mav_write_message.front());
+ 				m_mav_write_message.pop();
+@@ -408,7 +402,7 @@ write_thread(void)
+ 					fprintf(stderr,"WARNING: could not write mesage \n");
+ 			}
+ 
+-			pthread_mutex_unlock(&write_queue_mutex);
++			write_queue_mutex.unlock();
+ 		}
+ 
+ 		usleep(20000);
+@@ -462,21 +456,21 @@ void Autopilot_Interface::set_system_id(int _sys_id){
+ int8_t Autopilot_Interface::get_nxt_message(mavlink_message_t& _message){
+ 
+ 	int success = 0;
+-	pthread_mutex_lock(&read_queue_mutex);
++	read_queue_mutex.lock();
+ 	if(m_mav_message.size() > 0){
+ 		_message = m_mav_message.front();
+ 		m_mav_message.pop();
+ 		success = 1;
+ 	}
+ 	
+-	pthread_mutex_unlock(&read_queue_mutex);
++	read_queue_mutex.unlock();
+ 	return success;
+ }
+ 
+ void Autopilot_Interface::push_message_to_queue(mavlink_message_t message){
+-	pthread_mutex_lock(&write_queue_mutex);
++	write_queue_mutex.lock();
+ 	m_mav_write_message.push(message);
+-	pthread_mutex_unlock(&write_queue_mutex);
++	write_queue_mutex.unlock();
+ 	
+ }
+ 
+diff --git a/libs/third-party/mavlink/src/udp_port.cpp b/libs/third-party/mavlink/src/udp_port.cpp
+index 582a054..91c7f66 100644
+--- a/libs/third-party/mavlink/src/udp_port.cpp
++++ b/libs/third-party/mavlink/src/udp_port.cpp
+@@ -55,6 +55,15 @@
+ // ------------------------------------------------------------------------------
+ 
+ #include "udp_port.h"
++#ifdef _WIN32
++#include <timeapi.h>
++#define close_socket closesocket
++#define SHUT_RD SD_RECEIVE
++#define socket_errno() WSAGetLastError()
++#else
++#define close_socket close
++#define socket_errno() errno
++#endif
+ 
+ #define UDP_SERVER	0
+ #define UDP_CLIENT  1
+@@ -88,9 +97,10 @@ UDP_Port::
+ ~UDP_Port()
+ {
+ 	// App patch: stop() only shuts down; the fd is released here, after the I/O threads are joined
+-	if (sock >= 0) close(sock);
+-	// destroy mutex
+-	pthread_mutex_destroy(&lock);
++	if (sock != UDP_BAD_SOCKET) close_socket(sock);
++#ifdef _WIN32
++	if (wsa_started) { timeEndPeriod(1); WSACleanup(); }
++#endif
+ }
+ 
+ void
+@@ -105,15 +115,7 @@ initialize_defaults()
+ 
+ 	is_open = false;
+ 	debug = false;
+-	sock = -1;
+-
+-	// Start mutex
+-	int result = pthread_mutex_init(&lock, NULL);
+-	if ( result != 0 )
+-	{
+-		printf("\n mutex init failed\n");
+-		throw 1;
+-	}
++	sock = UDP_BAD_SOCKET;
+ }
+ 
+ 
+@@ -158,7 +160,10 @@ read_message(std::queue<mavlink_message_t> &message)
+ 	// Couldn't read from port
+ 	else
+ 	{
+-		fprintf(stderr, "ERROR: Could not read, res = %d, errno = %d : %m\n", result, errno);
++#ifdef _WIN32
++		if (socket_errno() != WSAETIMEDOUT) // the receive timeout only lets stop() be noticed
++#endif
++		fprintf(stderr, "ERROR: Could not read, res = %d, errno = %d\n", result, socket_errno());
+ 	}
+ 
+ 	// Done!
+@@ -183,7 +188,7 @@ write_message(const mavlink_message_t &message)
+ 	// Write buffer to UDP port, locks port while writing
+ 	int bytesWritten = _write_port(buf,len);
+ 	if(bytesWritten < 0){
+-		fprintf(stderr, "ERROR: Could not write, res = %d, errno = %d : %m\n", bytesWritten, errno);
++		fprintf(stderr, "ERROR: Could not write, res = %d, errno = %d\n", bytesWritten, socket_errno());
+ 	}
+ 
+ 	return bytesWritten;
+@@ -204,13 +209,35 @@ start()
+ 	//   OPEN PORT
+ 	// --------------------------------------------------------------------------
+ 
++#ifdef _WIN32
++	WSADATA wsa;
++	if (!wsa_started && WSAStartup(MAKEWORD(2, 2), &wsa) != 0)
++	{
++		fprintf(stderr, "error WSAStartup failed\n");
++		throw EXIT_FAILURE;
++	}
++	if (!wsa_started) timeBeginPeriod(1); // the read/write loops sleep 2-20 ms; the default tick is 15.6 ms
++	wsa_started = true;
++#endif
+ 	/* Create socket */
+ 	sock = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP);
+-	if (sock < 0)
++	if (sock == UDP_BAD_SOCKET)
+ 	{
+ 		perror("error socket failed");
+ 		throw EXIT_FAILURE;
+ 	}
++#ifdef _WIN32
++	{
++		// recvfrom() on an unbound socket fails at once on Windows (Linux binds on the first sendto)
++		struct sockaddr_in any;
++		memset(&any, 0, sizeof(any));
++		any.sin_family = AF_INET;
++		bind(sock, (struct sockaddr *)&any, sizeof(any));
++		// shutdown() does not reliably wake a blocked recvfrom() here; a timeout lets stop() be noticed
++		DWORD timeout_ms = 200;
++		setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char *)&timeout_ms, sizeof(timeout_ms));
++	}
++#endif
+ 
+ #if (UDP_MODE == UDP_SERVER)
+ 	printf("\x1b[32m %s : %d \t Set UDP_Port as UDP_SERVER\r\n\x1b[0m",__func__,__LINE__);
+@@ -228,8 +255,8 @@ start()
+ 	if (bind(sock, (struct sockaddr *) &addr, sizeof(struct sockaddr)))
+ 	{
+ 		perror("error bind failed");
+-		close(sock);
+-		sock = -1;
++		close_socket(sock);
++		sock = UDP_BAD_SOCKET;
+ 		throw EXIT_FAILURE;
+ 	}
+ 	// --------------------------------------------------------------------------
+@@ -295,11 +322,11 @@ _read_port(uint8_t &cp)
+ 	socklen_t len;
+ 
+ 	// Lock
+-	pthread_mutex_lock(&lock);
++	lock.lock();
+ 		int result = -1;
+ 		struct sockaddr_in addr;
+ 		len = sizeof(struct sockaddr_in);
+-		result = recvfrom(sock, &buff, BUFF_LEN, 0, (struct sockaddr *)&addr, &len);
++		result = recvfrom(sock, buff, BUFF_LEN, 0, (struct sockaddr *)&addr, &len);
+ 		if (result > 0 && observer) observer(0, (const uint8_t *)buff, result, &addr, 0); // App patch
+ 		
+ 		// printf("%s %d \n", __func__, result);
+@@ -315,7 +342,7 @@ _read_port(uint8_t &cp)
+ 	#endif
+ 
+ 	// Unlock
+-	pthread_mutex_unlock(&lock);
++	lock.unlock();
+ 
+ 	return result;
+ }
+@@ -338,9 +365,11 @@ _write_port(char *buf, unsigned len)
+ 		addr.sin_port = htons(tx_port);
+ 		bytesWritten = sendto(sock, buf, len, 0, (struct sockaddr*)&addr, sizeof(struct sockaddr_in));
+ 		if (observer) { // App patch
+-			int err = bytesWritten < 0 ? errno : 0;
++			int err = bytesWritten < 0 ? socket_errno() : 0;
+ 			observer(1, (const uint8_t *)buf, len, &addr, err);
++#ifndef _WIN32
+ 			errno = err;
++#endif
+ 		}
+ 		// printf("sendto: %s \t %i\n",target_ip,tx_port);
+ 	}else{

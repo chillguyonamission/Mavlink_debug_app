@@ -85,7 +85,7 @@ QVariant FrameModel::data(const QModelIndex &index, int role) const
     case Status: {
         QString s = QString::fromLatin1(statusName(f.status));
         if (f.signaturePresent) s += QStringLiteral(", signed (unverified)");
-        if (c.sendErrno) s += QStringLiteral(", SEND FAILED: ") + QString::fromLocal8Bit(strerror(c.sendErrno));
+        if (c.sendErrno) s += QStringLiteral(", SEND FAILED: ") + qt_error_string(c.sendErrno);
         return s;
     }
     case Summary: return c.summary;

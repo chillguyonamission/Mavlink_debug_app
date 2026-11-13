@@ -1,0 +1,76 @@
+name: build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build pkg-config qt6-base-dev libgl-dev libpcap-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libgstreamer-rtsp-server-1.0-dev \
+            gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav
+      - name: Build
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          cmake --build build
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+  windows:
+    runs-on: windows-2022
+    env:
+      GST_VERSION: 1.26.10
+      NPCAP_SDK_VERSION: "1.13"
+    steps:
+      - name: Keep LF line endings (the SDK patches must apply)
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ilammy/msvc-dev-cmd@v1
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: 6.8.3
+          arch: win64_msvc2022_64
+          cache: true
+      - name: GStreamer and Npcap SDK
+        shell: pwsh
+        run: |
+          $base = "https://gstreamer.freedesktop.org/data/pkg/windows/$env:GST_VERSION/msvc"
+          foreach ($m in "gstreamer-1.0-msvc-x86_64-$env:GST_VERSION.msi", "gstreamer-1.0-devel-msvc-x86_64-$env:GST_VERSION.msi") {
+            Invoke-WebRequest "$base/$m" -OutFile $m
+            Start-Process msiexec -Wait -ArgumentList "/i $m /qn ADDLOCAL=ALL INSTALLDIR=C:\gstreamer\"
+          }
+          $pc = Get-ChildItem C:\gstreamer -Recurse -Filter gstreamer-1.0.pc | Select-Object -First 1
+          if (-not $pc) { throw "GStreamer install not found" }
+          $root = $pc.Directory.Parent.Parent.FullName
+          "GST_ROOT=$root" >> $env:GITHUB_ENV
+          "PKG_CONFIG_PATH=$($pc.DirectoryName)" >> $env:GITHUB_ENV
+          "$root\bin" >> $env:GITHUB_PATH
+          Invoke-WebRequest "https://npcap.com/dist/npcap-sdk-$env:NPCAP_SDK_VERSION.zip" -OutFile npcap-sdk.zip
+          Expand-Archive npcap-sdk.zip -DestinationPath C:\npcap-sdk
+          "NPCAP_SDK=C:\npcap-sdk" >> $env:GITHUB_ENV
+      - name: pkg-config
+        shell: pwsh
+        run: |
+          # Strawberry Perl's pkg-config is first on the runner's PATH; use a real one
+          $pkg = "$env:GST_ROOT\bin\pkg-config.exe"
+          if (-not (Test-Path $pkg)) { choco install -y --no-progress pkgconfiglite; $pkg = "C:\ProgramData\chocolatey\bin\pkg-config.exe" }
+          "PKG_CONFIG_EXE=$pkg" >> $env:GITHUB_ENV
+          & $pkg --modversion gstreamer-1.0
+      - name: Build
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DPKG_CONFIG_EXECUTABLE="%PKG_CONFIG_EXE%"
+          cmake --build build
+        shell: cmd
+      - name: Test
+        run: ctest --test-dir build --output-on-failure

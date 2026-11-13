@@ -6,6 +6,27 @@
 
 #include <chrono>
 
+#ifdef _WIN32
+#include <windows.h>
+
+// wpcap.dll is delay-loaded (CMakeLists.txt): calling pcap without Npcap installed would crash, so every
+// entry point checks this first. Npcap installs to System32\Npcap, which is not on the DLL search path.
+static bool pcapReady(QString *error)
+{
+    static const bool loaded = [] {
+        wchar_t dir[MAX_PATH];
+        const UINT n = GetSystemDirectoryW(dir, MAX_PATH);
+        const std::wstring npcap = std::wstring(dir, n) + L"\\Npcap\\wpcap.dll";
+        return (n && LoadLibraryExW(npcap.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH))
+            || LoadLibraryW(L"wpcap.dll");  // WinPcap-compatible install
+    }();
+    if (!loaded && error) *error = QStringLiteral("Network capture needs Npcap: install it from https://npcap.com");
+    return loaded;
+}
+#else
+static bool pcapReady(QString *) { return true; }
+#endif
+
 static quint16 be16(const uint8_t *p) { return quint16(p[0] << 8 | p[1]); }
 static quint32 be32(const uint8_t *p) { return quint32(p[0]) << 24 | quint32(p[1]) << 16 | quint32(p[2]) << 8 | p[3]; }
 
@@ -29,11 +50,13 @@ bool udpPayload(int linkType, const uint8_t *p, size_t n, UdpPacket *out)
         etherType = be16(p + 14);
         off = 16;
         break;
+#ifdef DLT_LINUX_SLL2
     case DLT_LINUX_SLL2:
         if (n < 20) return false;
         etherType = be16(p);
         off = 20;
         break;
+#endif
     case DLT_RAW:
 #ifdef DLT_IPV4
     case DLT_IPV4:
@@ -76,6 +99,7 @@ PcapCapture::~PcapCapture()
 QStringList PcapCapture::interfaces(QString *error)
 {
     QStringList out;
+    if (!pcapReady(error)) return out;
     char err[PCAP_ERRBUF_SIZE] = {0};
     pcap_if_t *all = nullptr;
     if (pcap_findalldevs(&all, err) != 0) {
@@ -90,6 +114,7 @@ QStringList PcapCapture::interfaces(QString *error)
 bool PcapCapture::startLive(const QString &iface, const QString &filter, QString *error)
 {
     stop();
+    if (!pcapReady(error)) return false;
     char err[PCAP_ERRBUF_SIZE] = {0};
     pcap_t *p = pcap_create(iface.toLocal8Bit().constData(), err);
     if (!p) {
@@ -111,6 +136,7 @@ bool PcapCapture::startLive(const QString &iface, const QString &filter, QString
 bool PcapCapture::openFile(const QString &path, const QString &filter, QString *error)
 {
     stop();
+    if (!pcapReady(error)) return false;
     char err[PCAP_ERRBUF_SIZE] = {0};
     pcap_t *p = pcap_open_offline(path.toLocal8Bit().constData(), err);
     if (!p) {

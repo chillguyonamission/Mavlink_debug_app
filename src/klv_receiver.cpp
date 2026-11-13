@@ -7,8 +7,12 @@
 #include <gst/gst.h>
 #include <gst/video/video.h>
 
+#ifdef _WIN32
+#include <ws2tcpip.h>
+#else
 #include <arpa/inet.h>
 #include <net/if.h>
+#endif
 
 static const char *const kRequiredElements[] = {"udpsrc", "rtpmp2tdepay", "tsdemux", "queue", "h264parse",
                                                 "avdec_h264", "videoconvert", "appsink", "fakesink"};
@@ -76,8 +80,10 @@ QString KlvReceiver::validate(const Config &c)
         return QStringLiteral("\"%1\" is not an IPv4 address").arg(c.address);
     if (c.port < 1 || c.port > 65535)
         return QStringLiteral("Port must be 1 to 65535");
+#ifndef _WIN32
     if (!c.iface.isEmpty() && if_nametoindex(c.iface.toUtf8().constData()) == 0)
         return QStringLiteral("No network interface named \"%1\"").arg(c.iface);
+#endif
     // What this pipeline can depayload: anything else would never negotiate and would only look like silence
     if (c.media != QLatin1String("video"))
         return QStringLiteral("RTP media must be \"video\"");
@@ -91,11 +97,13 @@ QString KlvReceiver::validate(const Config &c)
 QStringList KlvReceiver::interfaces()
 {
     QStringList out;
+#ifndef _WIN32  // shortcut: Windows lists none, so the kernel picks the multicast interface; add one if a PC has several
     if (struct if_nameindex *list = ::if_nameindex()) {
         for (struct if_nameindex *i = list; i->if_index; ++i)
             out << QString::fromLocal8Bit(i->if_name);
         if_freenameindex(list);
     }
+#endif
     return out;
 }
 
