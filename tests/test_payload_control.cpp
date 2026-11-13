@@ -648,6 +648,32 @@ private slots:
         QCOMPARE(link.tracker().commands().size(), tracked);
     }
 
+    void autoRequestRepeatsAfterStale()
+    {
+        // A rebooted VIO forgets the streams it was asked for, so they are asked for again when it returns
+        PayloadLink link;
+        link.setTimeoutMs(1000);
+        FakePayload fake;
+        link.connectTo(QStringLiteral("127.0.0.1"), fake.port);
+        QTRY_STATE(link, LinkState::SocketOpen, 5000);
+        QVERIFY(fake.learnAppEndpoint());
+        auto infoReq = [](const MavFrame &x) {
+            return x.msgid == MAVLINK_MSG_ID_COMMAND_LONG && mavlink_msg_command_long_get_command(&x.msg) == MAV_CMD_REQUEST_MESSAGE &&
+                   int(mavlink_msg_command_long_get_param1(&x.msg)) == MAVLINK_MSG_ID_COMPONENT_INFORMATION_BASIC;
+        };
+        fake.sendHeartbeat(MAV_COMP_ID_CAMERA, MAV_TYPE_CAMERA);
+        fake.sendHeartbeat(TelemetryStore::kPayloadCore, MAV_TYPE_GENERIC);
+        QVERIFY(waitTx(fake, infoReq));
+
+        QTRY_STATE(link, LinkState::Stale, 3000);  // silent payload
+        QVERIFY(!waitTx(fake, infoReq, nullptr, 500));  // nothing is asked of a payload that is not there
+        fake.sendHeartbeat(MAV_COMP_ID_CAMERA, MAV_TYPE_CAMERA);  // the camera returns first, as on the VIO
+        QVERIFY(!waitTx(fake, infoReq, nullptr, 500));            // the streams' source, the core, is still down
+        fake.sendHeartbeat(TelemetryStore::kPayloadCore, MAV_TYPE_GENERIC);
+        QVERIFY(waitTx(fake, infoReq));
+        QVERIFY(!waitTx(fake, infoReq, nullptr, 1500));  // once per return, not on every heartbeat
+    }
+
     void commandsOnTheWire()
     {
         PayloadLink link;

@@ -43,7 +43,7 @@ recording. What changes per model is listed below, using only that model's heade
 | IR palette | ✅ | not supported (EO only) | ✅ | ✅ |
 | Object tracking | ✅ (verified) | ✅ | ✅ | ✅ |
 | Focus | ✅ | ✅ | not supported | ✅ |
-| Gimbal control source | `GB_FW_FLAG` Autopilot / Onboard computer / SBUS Convert | none named | `GB_FW_FLAG` Overwrite / Forward | none named |
+| Gimbal control source | `GB_FW_FLAG` Autopilot / Onboard computer / SBUS Convert | same | same | same |
 | Camera settings dialog | 30: exposure, image, focus/zoom, thermal, video/OSD/LRF | 25: exposure, image, focus/zoom, video/OSD | 60: exposure, image, focus/zoom, thermal, isotherm regions, video/OSD/AI | 38: exposure, image, focus/zoom, thermal, video/OSD/LRF |
 
 A control the model does not support is shown disabled as "not supported by <model>". Tracking is replaced
@@ -72,7 +72,7 @@ scripts/build.sh --run        # checks dependencies, builds, runs the tests, sta
 
 | Path | Contents |
 |---|---|
-| `third_party/PayloadSdk` | Gremsy PayloadSDK, git submodule pinned to `payloadsdk_v3` @ `fba3c70` (GPL-3.0) |
+| `third_party/PayloadSdk` | Gremsy PayloadSDK, git submodule pinned to `payloadsdk_v3` @ `2021d9f` (GPL-3.0) |
 | `patches/payloadsdk-transport-observer.patch` | The only SDK modification; applied automatically by CMake |
 | `src/mavlink_frame.*` | Qt-free MAVLink framing, CRC validation, and field decoding |
 | `src/payload_link.*` | The single owner of the SDK connection; moves frames from the SDK's I/O threads to the GUI thread |

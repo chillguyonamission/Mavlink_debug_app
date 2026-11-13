@@ -157,7 +157,11 @@ const PayloadProfile &oruslProfile()
              {{PAYLOAD_LRF_MODE_OFF, "Off"}, {PAYLOAD_LRF_MODE_1HZ, "1 Hz"}, {PAYLOAD_LRF_MODE_4HZ, "4 Hz"},
               {PAYLOAD_LRF_MODE_10HZ, "10 Hz"}}},
         },
-        nullptr, {}, 0,  // orusl_sdk.h names no gimbal control source
+        PAYLOAD_CAMERA_GIMBAL_FW_FLAG,
+        {{PAYLOAD_CAMERA_GIMBAL_FW_FLAG_AUTOPILOT, "Autopilot"},
+         {PAYLOAD_CAMERA_GIMBAL_FW_FLAG_ONBOARD_COMPUTER, "Onboard computer"},
+         {PAYLOAD_CAMERA_GIMBAL_FW_FLAG_SBUS_CONVERT, "SBUS Convert"}},
+        PAYLOAD_CAMERA_GIMBAL_FW_FLAG_ONBOARD_COMPUTER,
     };
     return p;
 }

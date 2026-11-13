@@ -188,8 +188,10 @@ const PayloadProfile &mb1Profile()
             {"Video / OSD / AI", "Object detection", PAYLOAD_CAMERA_OBJECT_DETECTION, enable},
         },
         PAYLOAD_CAMERA_GIMBAL_FW_FLAG,
-        {{PAYLOAD_CAMERA_GIMBAL_FW_FLAG_OVERWRITE, "Overwrite"}, {PAYLOAD_CAMERA_GIMBAL_FW_FLAG_FORWARD, "Forward"}},
-        PAYLOAD_CAMERA_GIMBAL_FW_FLAG_FORWARD,  // forward this app's gimbal commands to the gimbal
+        {{PAYLOAD_CAMERA_GIMBAL_FW_FLAG_AUTOPILOT, "Autopilot"},
+         {PAYLOAD_CAMERA_GIMBAL_FW_FLAG_ONBOARD_COMPUTER, "Onboard computer"},
+         {PAYLOAD_CAMERA_GIMBAL_FW_FLAG_SBUS_CONVERT, "SBUS Convert"}},
+        PAYLOAD_CAMERA_GIMBAL_FW_FLAG_ONBOARD_COMPUTER,
         false,
         {"Lynx", "GHadron", "GHardron"},
     };

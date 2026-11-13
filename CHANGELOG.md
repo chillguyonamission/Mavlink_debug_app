@@ -7,10 +7,20 @@ Newest first. "Tested" means the hardware-free CTest suite unless a line says ha
 
 ### Changed
 
+- **PayloadSDK** moved from `fba3c70` to `2021d9f` (23 upstream commits). The app's SDK patch applies unchanged. Read-only
+  capture on a VIO (3.1.9.24) with the new SDK: no errors, the same answers as before.
+- **Gimbal control source** now comes from each model's SDK header: `GB_FW_FLAG` Autopilot / Onboard computer / SBUS Convert
+  on all four models. ZIO and OrusL gain the control-source switch; MB1's values were renamed upstream from Overwrite / Forward.
+  Only VIO has run on hardware.
+
 - **Camera settings:** now a panel under the video instead of a window on top of it, so the picture stays visible while adjusting. It takes the MAVLink monitor's place until closed.
   Tested with a fake payload; the panel has not been opened on hardware.
 
 ### Fixed
+
+- After a payload reboot, EO/IR zoom, FFC mode and IR temperatures stopped updating and the rangefinder fell from 10 Hz to
+  1 Hz: the payload forgets the streams it was asked for, and the app asked once per connection. It now asks again when the
+  payload core's heartbeat returns after the link was stale. Found on a VIO by power-cycling it; tested with a fake payload.
 
 - The mouse wheel over any combo box no longer changes it. Qt reports that as a user choice, so scrolling a column past
   one could send a command, such as the gimbal control source.

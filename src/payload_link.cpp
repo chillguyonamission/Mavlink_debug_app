@@ -181,19 +181,23 @@ void PayloadLink::poll()
     if (commands) emit commandsChanged();
     updateDetection(detPackets);
 
-    // Once per connection, as Gremsy's ui_demo does: ask for info and start the parameter streams. The SDK addresses
-    // the camera at compid 101 until its own message thread has handled a camera frame, which comes after this
-    // observer saw it: wait 300 ms past the first camera frame (at most 5 s when no camera answers).
+    // Once per connection, as Gremsy's ui_demo does, and again after the link was stale: ask for info and start the
+    // parameter streams. The SDK addresses the camera at compid 101 until its own message thread has handled a camera
+    // frame, which comes after this observer saw it: wait 300 ms past the first camera frame (at most 5 s when no
+    // camera answers). The payload core's heartbeat must be fresh, since it serves the streams.
     const qint64 nowMsec = monoNs() / 1000000;
     const bool cameraKnown = (m_cameraSeenMs >= 0 && nowMsec - m_cameraSeenMs >= 300) ||
                              (m_openSinceMs >= 0 && nowMsec - m_openSinceMs > 5000);
-    if (!m_autoInfoSent && isOpen(m_state) && cameraKnown && m_telemetry.latest(MAVLINK_MSG_ID_HEARTBEAT, TelemetryStore::kPayloadCore)) {
+    const CapturedFrame *core = m_telemetry.latest(MAVLINK_MSG_ID_HEARTBEAT, TelemetryStore::kPayloadCore);
+    if (!m_autoInfoSent && isOpen(m_state) && cameraKnown && core && nowMsec - core->monoNs / 1000000 < m_timeoutMs) {
         m_autoInfoSent = true;
         requestPayloadInfo(true);
     }
 
     if (isOpen(m_state)) {
         const LinkState s = evaluateLink(m_obs, monoNs() / 1000000, m_timeoutMs);
+        // A rebooted payload forgets the streams it was asked for (seen on a VIO, 2026-11-13): ask again on return.
+        if (s == LinkState::Stale) m_autoInfoSent = false;
         if (s != m_state) setState(s);
     }
 }
