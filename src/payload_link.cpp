@@ -291,9 +291,9 @@ bool PayloadLink::gimbalAngle(double pitch, double yaw, double maxDps)
     if (m_steer) endSteer(false, QStringLiteral("Replaced by a new angle"));
     GimbalAttitude a;
     gimbalAttitude(m_telemetry.latest(MAVLINK_MSG_ID_GIMBAL_DEVICE_ATTITUDE_STATUS)->frame, &a);  // setMotionFlags() checked it
-    const double far = std::max(std::abs(pitch - a.pitchDeg), std::abs(angleDiff(yaw, a.yawDeg)));
+    const double distance = std::max(std::abs(pitch - a.pitchDeg), std::abs(angleDiff(yaw, a.yawDeg)));
     // Time at full speed, plus the exponential approach (gain 1/s) and the stream's pauses; then it stops
-    m_steer = Steer{pitch, yaw, maxDps, nowMs() + 8000 + qint64(std::min(30000.0, 2000 * far / maxDps))};
+    m_steer = Steer{pitch, yaw, maxDps, nowMs() + 8000 + qint64(std::min(30000.0, 2000 * distance / maxDps))};
     m_tracker.expect(QStringLiteral("Move to angle pitch %1° yaw %2° (steered by rate, ≤ %3°/s)").arg(pitch).arg(yaw).arg(maxDps),
                      MAVLINK_MSG_ID_GIMBAL_DEVICE_SET_ATTITUDE, 0, {}, nowMs(), [](const MavFrame &f) {
                          float q[4];
