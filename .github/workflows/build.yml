@@ -50,8 +50,12 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force downloads | Out-Null
-          function Get-File($url, $out) {  # the GStreamer server drops large downloads now and then
-            if (-not (Test-Path $out)) { curl.exe -fL --retry 5 --retry-all-errors -o $out $url; if ($LASTEXITCODE) { throw "download failed: $url" } }
+          function Get-File($url, $out) {  # the GStreamer server cuts large downloads; resume until complete
+            for ($i = 0; $i -lt 20; $i++) {
+              curl.exe -fsSL -C - -o $out $url
+              if ($LASTEXITCODE -eq 0) { return }
+            }
+            throw "download failed: $url"
           }
           $base = "https://gstreamer.freedesktop.org/data/pkg/windows/$env:GST_VERSION/msvc"
           foreach ($m in "gstreamer-1.0-msvc-x86_64-$env:GST_VERSION.msi", "gstreamer-1.0-devel-msvc-x86_64-$env:GST_VERSION.msi") {
