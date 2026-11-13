@@ -84,5 +84,12 @@ jobs:
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DPKG_CONFIG_EXECUTABLE="%PKG_CONFIG_EXE%"
           cmake --build build -- -k 0
         shell: cmd
+      - name: GStreamer registry and elements
+        shell: pwsh
+        run: |
+          # The first gst_init on a fresh machine scans every plugin (slow on Windows); do it outside the test timeouts
+          $missing = "appsink appsrc avdec_h264 fakesink h264parse mpegtsmux openh264enc rtph264pay rtpmp2tdepay rtpmp2tpay rtspsrc tsdemux udpsink udpsrc videoconvert videotestsrc".Split(" ") |
+            Where-Object { gst-inspect-1.0 $_ *> $null; $LASTEXITCODE -ne 0 }
+          if ($missing) { Write-Output "Missing GStreamer elements: $missing" }
       - name: Test
         run: ctest --test-dir build --output-on-failure
