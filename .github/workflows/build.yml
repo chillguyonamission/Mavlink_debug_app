@@ -42,13 +42,21 @@ jobs:
           version: 6.8.3
           arch: win64_msvc2022_64
           cache: true
+      - uses: actions/cache@v4
+        with:
+          path: downloads
+          key: win-downloads-gst${{ env.GST_VERSION }}-npcap${{ env.NPCAP_SDK_VERSION }}
       - name: GStreamer and Npcap SDK
         shell: pwsh
         run: |
+          New-Item -ItemType Directory -Force downloads | Out-Null
+          function Get-File($url, $out) {  # the GStreamer server drops large downloads now and then
+            if (-not (Test-Path $out)) { curl.exe -fL --retry 5 --retry-all-errors -o $out $url; if ($LASTEXITCODE) { throw "download failed: $url" } }
+          }
           $base = "https://gstreamer.freedesktop.org/data/pkg/windows/$env:GST_VERSION/msvc"
           foreach ($m in "gstreamer-1.0-msvc-x86_64-$env:GST_VERSION.msi", "gstreamer-1.0-devel-msvc-x86_64-$env:GST_VERSION.msi") {
-            Invoke-WebRequest "$base/$m" -OutFile $m
-            Start-Process msiexec -Wait -ArgumentList "/i $m /qn ADDLOCAL=ALL INSTALLDIR=C:\gstreamer\"
+            Get-File "$base/$m" "downloads\$m"
+            Start-Process msiexec -Wait -ArgumentList "/i downloads\$m /qn ADDLOCAL=ALL INSTALLDIR=C:\gstreamer\"
           }
           $pc = Get-ChildItem C:\gstreamer -Recurse -Filter gstreamer-1.0.pc | Select-Object -First 1
           if (-not $pc) { throw "GStreamer install not found" }
@@ -56,8 +64,8 @@ jobs:
           "GST_ROOT=$root" >> $env:GITHUB_ENV
           "PKG_CONFIG_PATH=$($pc.DirectoryName)" >> $env:GITHUB_ENV
           "$root\bin" >> $env:GITHUB_PATH
-          Invoke-WebRequest "https://npcap.com/dist/npcap-sdk-$env:NPCAP_SDK_VERSION.zip" -OutFile npcap-sdk.zip
-          Expand-Archive npcap-sdk.zip -DestinationPath C:\npcap-sdk
+          Get-File "https://npcap.com/dist/npcap-sdk-$env:NPCAP_SDK_VERSION.zip" downloads\npcap-sdk.zip
+          Expand-Archive downloads\npcap-sdk.zip -DestinationPath C:\npcap-sdk
           "NPCAP_SDK=C:\npcap-sdk" >> $env:GITHUB_ENV
       - name: pkg-config
         shell: pwsh
