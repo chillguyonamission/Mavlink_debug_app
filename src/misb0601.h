@@ -1,7 +1,7 @@
 #pragma once
 // MISB ST 0601 (UAS Datalink Local Set) decoder.
 // Tag table follows the Gremsy ViO "Supported KLV keys (MISB 0601)" page; where that page
-// is ambiguous the MISB ST 0601.8 definition is used (see README "Decoder assumptions").
+// is ambiguous the MISB ST 0601.8 definition is used (see docs/KLV_STREAM.md).
 
 #include <QByteArray>
 #include <QList>

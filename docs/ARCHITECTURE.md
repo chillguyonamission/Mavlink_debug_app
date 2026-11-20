@@ -1,6 +1,67 @@
 # Architecture
 
-The module list is in `README.md` under *Layout*. This page covers how data moves and who owns what.
+How the app is put together: where the code lives, the decisions behind it, the SDK patches, and how data moves.
+
+## Source layout
+
+| Path | Contents |
+|---|---|
+| `third_party/PayloadSdk` | Gremsy PayloadSDK, submodule pinned to `payloadsdk_v3` @ `2021d9f` (GPL-3.0). Never edited; patched at build time |
+| `patches/` | `payloadsdk-transport-observer.patch` (TX/RX observer, shutdown fixes), then `payloadsdk-windows.patch` (Winsock, `std::thread`) |
+| `src/payload_link.*` | The single owner of the SDK connection; moves frames from the SDK's threads to the GUI thread |
+| `src/mavlink_frame.*`, `src/mavlink_dict.*`, `src/frame_text.*` | Qt-free framing, CRC and field decoding; units and enum names from the MAVLink XML; text, hex and CSV/JSON encoding |
+| `src/link_health.*`, `src/command_tracker.*`, `src/telemetry.*` | Link states; matching each action to its frame and ACK; latest validated RX values and the DEBUG parameter stream |
+| `src/frame_model.*`, `src/frame_filter.*`, `src/flow_stats.*`, `src/frame_writer.*` | Monitor table, filters, per-flow statistics, background file writer |
+| `src/payload_profile*` | Per-model IDs and values from each SDK header (`<model>_sdk.h`) |
+| `src/detection.*` | Object detection packets: validation, states, mapping onto the picture |
+| `src/video_player.*`, `src/video_page.*` | RTSP video (GStreamer `appsink`) and the video source selector |
+| `src/klv_receiver.*`, `src/misb0601.*`, `src/metadata_model.*`, `src/klv_page.*` | RTP/MPEG-TS receiver, MISB ST 0601 decoder, KLV model and panels |
+| `src/pcap_capture.*` | Network capture (libpcap), shown as NET |
+| `src/gamepad.*`, `src/gamepad_page.*` | Gamepad reader (evdev / XInput), channel-to-function mapping, Analyze › Gamepad |
+| `src/diagnostics.*`, `src/diagnostics_page.*`, `src/web_settings_page.*` | DIAGNOSE view |
+| `src/main_window.*`, `src/payload_pages.*`, `src/inspector_widget.*`, `src/stats_widget.*`, `src/theme.*`, `src/profiles.*` | GUI: header, Operate and Analyze pages, monitor, theme, saved profiles |
+| `tests/` | Hardware-free CTest suite; `fake_payload.h` is a loopback UDP peer. `hw_vio_commands.cpp` is the hardware check |
+| `tools/` | `mavlink_capture` (headless capture and report), `check_tlog.py` (independent pymavlink check of `.tlog` files) |
+| `scripts/`, `packaging/`, `.github/workflows/build.yml` | Build script, AppImage and Windows zip packaging, CI on Ubuntu and Windows (MSVC) |
+
+## Design decisions
+
+- **One connection owner.** The SDK's `UDP_Port` (a UDP client: target set at runtime, ephemeral local port) carries every
+  command. The app never opens a second command channel.
+- **See the real traffic.** The SDK patch adds `regTransportObserver()`, called with every raw RX datagram (and sender) and
+  every TX frame (and `sendto` result) before the SDK parses anything. Frames the SDK's parser would drop are shown too.
+- **Models at runtime.** The SDK library is model-agnostic; its `VIO/ZIO/MB1/ORUSL` defines only pick a header of IDs and
+  values. Each model is a data profile built from its header, chosen with **Model** in SETTINGS.
+- **Only observed facts.** Link status, the overlay and the health check come from validated RX frames within the timeout,
+  never from what was sent.
+- **Platforms.** Ubuntu 24.04 first (native and WSL2). Windows came on 2026-11-13 through a second SDK patch; UART control
+  stays Linux-only.
+
+## SDK patches
+
+`patches/payloadsdk-transport-observer.patch`:
+
+1. **Transport observer** on `Generic_Port`, called from `UDP_Port` read and write.
+2. **Shutdown:** `UDP_Port::stop()` closed the socket while the reader was blocked in `recvfrom()`, so a silent payload
+   could hang the join. It now calls `shutdown(SHUT_RD)` and closes in the destructor.
+3. **`sdkQuit()`** is idempotent and joins the receive thread, which was never joined.
+4. **`~PayloadSdkInterface()`** frees the port and interface, which leaked on every reconnect.
+5. **`setGimbalDeviceFlags()`** so rate and angle commands carry the gimbal's real mode (see [HARDWARE_RESULTS.md](HARDWARE_RESULTS.md)).
+
+`tests/test_sdk_transport.cpp` connects and disconnects twice against a silent loopback peer and checks `sdkQuit()`
+returns in under 2 s (measured: 15 ms).
+
+`patches/payloadsdk-windows.patch`, applied second: Winsock instead of BSD sockets, `std::thread` / `std::mutex` instead of
+pthread, 1 ms timer resolution for the polling loops, and UDP connection resets ignored.
+
+## MAVLink parsing
+
+- Each UDP datagram is split into frames on its own. MAVLink 1 and 2, 24-bit IDs, trimmed v2 payloads and extensions are
+  handled.
+- Statuses: `OK`, `BAD_CRC`, `UNKNOWN_ID` (no CRC_EXTRA to check with), `TRUNCATED`, `GARBAGE`.
+- CRC_EXTRA and field tables come from the SDK's generated `ardupilotmega` dialect.
+- Signatures are detected but not verified (no key).
+
 
 ## Ownership
 
@@ -16,14 +77,15 @@ The module list is in `README.md` under *Layout*. This page covers how data move
 
 | Thread | Runs | Rule |
 |---|---|---|
-| SDK I/O threads | `regTransportObserver()` callback | Copies the datagram into a bounded queue under `m_mutex` |
+| SDK I/O threads | `regTransportObserver()` callback | Copies the datagram into a bounded queue (20,000) under `m_mutex`; overflow is counted and shown |
 | SDK receive thread | `regPayloadDetectionChanged()` callback | Copies the packet into a queue of at most 64 under `m_mutex`; drops the oldest when full |
 | GUI thread | `PayloadLink::poll()` every 100 ms | Takes both, parses, updates state, emits signals |
 | GStreamer streaming thread | `VideoPlayer::onSample()` | Copies the newest frame; the GUI takes the latest |
 | GStreamer streaming threads | `KlvReceiver` probes and appsink callbacks | Count; copy the newest frame; copy KLV into a queue of at most 64, dropping the oldest |
 | GUI thread | `KlvReceiver::drainKlv()`, `MetadataModel` | Takes the KLV queue, parses it, and updates the model. Model and widgets are touched only here |
 
-No SDK or GStreamer thread touches a widget.
+No SDK or GStreamer thread touches a widget. Connect (the SDK blocks about 1 s) and disconnect run on a worker
+thread; closing the window waits for it and joins the SDK threads.
 
 ## Object detection path
 

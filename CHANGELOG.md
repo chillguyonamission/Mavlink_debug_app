@@ -1,104 +1,136 @@
 # Changelog
 
-Newest first. "Tested" means the hardware-free CTest suite unless a line says hardware. See
-`docs/DEVELOPMENT_PROGRESS.md` for what has and has not run on a real payload.
+Newest first, grouped by date. "Tested" means the hardware-free suite against a fake payload; "hardware" means a real
+unit. Current status of each feature: [docs/DEVELOPMENT_PROGRESS.md](docs/DEVELOPMENT_PROGRESS.md).
 
-## Unreleased
+## 2026-11-20: Gamepad
 
 ### Added
 
-- **Gamepad control** (run with an Xbox Series X pad) and **Analyze › Gamepad**, the configuration page from Gremsy's gamepad
-  document: any function on any of 19 channels (one function per channel), INVERT and DEADZONE per stick axis, live
-  sticks and triggers, the pad picture with each control's function, saved between runs. Functions: gimbal pitch / yaw /
-  roll rate, zoom, home, LOCK/FOLLOW, photo, record, view and record source, tracking on/off, zoom tele / wide. Linux
-  reads evdev, Windows XInput; no new dependency. Hardware: the user ran the fixed Xbox layout on a VIO (Linux) with all
-  functions working; the configuration page, roll, triggers, D-pad, tracking and tele / wide have run only in tests. The
-  Windows reader only builds in CI; Bluetooth is untested.
-- **DIAGNOSE view.** Health check (link, each payload part's heartbeat and state, decoded gimbal failure flags, model,
-  payload value stream, frame and send errors, sequence gaps, failed commands), a read-only network check (PC
-  adapters on the payload's subnet, its TCP services, its software list from the web app), an SDK update check
-  against GitHub, and a text report. Tested with unit tests and a loopback network check; not yet on a payload.
-- **Web settings tab:** the payload's web app inside the app (Qt WebEngine), or **Open in browser** without it. The
-  pages were checked in Qt WebEngine on a VIO (Setting App 2.7.0.12) before this was built; the tab itself has not
-  run against a payload yet.
-- **Portable packages from CI:** Windows zip (Qt, GStreamer plugins, MAVLink XML) and a Linux AppImage.
-
-- **Windows build (in progress).** The SDK is ported by `patches/payloadsdk-windows.patch`: Winsock instead of BSD sockets,
-  `std::thread`/`std::mutex` instead of pthread, 1 ms timer resolution for its polling loops. UART control is Linux-only.
-  Network capture on Windows needs the user to install Npcap (it may not be bundled); without it the capture tools say so.
-  CI builds and tests on Ubuntu 24.04 (13/13) and Windows Server 2022 with MSVC (12/12; the libpcap test is Linux-only).
-  KLV settings list Windows adapters by their system names (e.g. `ethernet_32769`); whether GStreamer's multicast
-  interface option accepts them is untested. Nothing has run on a Windows PC with a payload yet.
+- **Gamepad control** for the gimbal and camera, written for the Xbox Series X pad. Linux reads evdev, Windows XInput;
+  no new dependency. **Hardware:** the fixed Xbox layout ran on a VIO (Linux, wired pad) with every function working.
+- **Analyze › Gamepad**, the configuration page from Gremsy's "Configuration Page - Gamepad control" document:
+  - any function on any of 19 channels, one function per channel;
+  - INVERT and DEADZONE (0–30 %, default 8 %) per stick axis;
+  - live sticks and triggers, and a pad picture with each control's function;
+  - saved between runs.
+  - Functions: gimbal pitch / yaw / roll rate, zoom, home, LOCK/FOLLOW, photo, record, view and record source,
+    tracking on/off, zoom tele / wide.
+  - Tested only. Roll, triggers, D-pad, tracking and tele / wide have not run on a payload. Bluetooth is untested.
 
 ### Changed
 
-- **PayloadSDK** moved from `fba3c70` to `2021d9f` (23 upstream commits). The app's SDK patch applies unchanged. Read-only
-  capture on a VIO (3.1.9.24) with the new SDK: no errors, the same answers as before.
-- **Gimbal control source** now comes from each model's SDK header: `GB_FW_FLAG` Autopilot / Onboard computer / SBUS Convert
-  on all four models. ZIO and OrusL gain the control-source switch; MB1's values were renamed upstream from Overwrite / Forward.
-  Only VIO has run on hardware.
+- Checkboxes have a visible style across the app.
+- The GUI test ignores a pad plugged into the PC (`MAVLINK_DEBUG_NO_GAMEPAD`).
+- Documentation reorganised: a short README, plus a user guide, hardware results and one progress page in `docs/`.
 
-- **Camera settings:** now a panel under the video instead of a window on top of it, so the picture stays visible while adjusting. It takes the MAVLink monitor's place until closed.
-  Tested with a fake payload; the panel has not been opened on hardware.
-
-### Fixed
-
-- After a payload reboot, EO/IR zoom, FFC mode and IR temperatures stopped updating and the rangefinder fell from 10 Hz to
-  1 Hz: the payload forgets the streams it was asked for, and the app asked once per connection. It now asks again when the
-  payload core's heartbeat returns after the link was stale. Found on a VIO by power-cycling it; tested with a fake payload.
-
-- The mouse wheel over any combo box no longer changes it. Qt reports that as a user choice, so scrolling a column past
-  one could send a command, such as the gimbal control source.
+## 2026-11-13: Windows and DIAGNOSE
 
 ### Added
 
-- **Stream bitrate:** EO and IR bitrate presets (0.512 to 16 Mbit/s) in Operate › SETTINGS, changed while connected. Tested with a fake
-  payload; not run on hardware. See `docs/API_INTEGRATION.md`.
-- **RTP/TS video + KLV:** a video source selector in Operate › LIVE VIDEO, alongside RTSP. Plays H.264 from an RTP/MPEG-TS stream and
-  decodes MISB ST 0601 KLV from the same stream, with a compact panel under the video and a new Analyze › KLV tab. Decoder and
-  model come from the KLV monitor project. Tested with a synthetic stream; not run on hardware. Metadata is the latest in the
-  stream and is not synchronised to frames. Memory grows by about 20 MB per hour in this mode, from `avdec_h264`. See `docs/KLV_STREAM.md`.
-- **Object detection:** enable and disable from Operate › OBJECT DETECTION, status with seven states, boxes painted
-  on the existing video view, click to select a box by track ID. Data comes from the SDK's
-  `regPayloadDetectionChanged()` callback. Tested with a fake payload; not run on hardware.
-- **Detection data window:** the **Detection data…** button opens a separate window with the newest packet's boxes, a
-  summary, Pause, and a log of the last 1000 packets. Class numbers carry a marked COCO guess in this window only. Tested
-  with a fake payload; not run on hardware.
+- **DIAGNOSE view:**
+  - **Health check:** link, each payload part's heartbeat and state, decoded gimbal failure flags, model, payload value
+    stream, frame and send errors, sequence gaps, failed commands.
+  - **Network check (read-only):** PC adapters on the payload's subnet, its TCP services, and its software list from the
+    web app.
+  - **SDK update check** against GitHub, and a text report.
+  - Tested with a loopback network check only.
+- **Web settings tab:** the payload's web app inside the app (Qt WebEngine), or **Open in browser**. The pages were
+  checked in Qt WebEngine on a VIO (Setting App 2.7.0.12); the tab itself has not run against a payload.
+- **Windows build:**
+  - `patches/payloadsdk-windows.patch` ports the SDK: Winsock, `std::thread` / `std::mutex`, 1 ms timer resolution.
+  - CI on Ubuntu 24.04 and Windows Server 2022 (MSVC).
+  - Network capture on Windows needs Npcap installed by the user. UART control is Linux-only.
+  - Not run on a Windows PC with a payload.
+- **Portable packages from CI:** a Windows zip (Qt, GStreamer, MAVLink XML inside) and a Linux AppImage.
+
+### Changed
+
+- **PayloadSDK** `fba3c70` → `2021d9f` (23 upstream commits). The app's patch applies unchanged. Hardware: a read-only
+  capture on a VIO (3.1.9.24) gave the same answers.
+- **Gimbal control source** comes from each model's SDK header; ZIO and OrusL gain the switch. Only VIO has run on
+  hardware.
+
+### Fixed
+
+- After a payload reboot, zoom, FFC, IR temperatures and the rangefinder stopped updating: the payload forgets the
+  requested streams. The app now asks again when the payload core's heartbeat returns. Found on a VIO; fix tested only.
+
+## 2026-11-04: Bitrate and camera settings panel
+
+- **Added:** EO and IR stream bitrate presets (0.512–16 Mbit/s) in SETTINGS. Tested only.
+- **Changed:** camera settings open as a panel under the video, replacing the MAVLink monitor until closed, so the
+  picture stays visible.
+- **Fixed:** the mouse wheel over a combo box no longer changes it. Scrolling past one could send a command, such as the
+  gimbal control source.
+- **Hardware:** the app ran live on a VIO with 3.1.9.24. Heartbeat, RTP/TS video and KLV worked over UDP unicast to
+  `192.168.55.100:8554`.
+
+## 2026-11-03: RTP/TS video and KLV
+
+- **Added:** a second video source, H.264 from an RTP/MPEG-TS stream with MISB ST 0601 KLV from the same stream.
+  - A compact KLV panel under the video, and Analyze › KLV.
+  - Decoder and model come from the KLV monitor project.
+  - Metadata is the latest in the stream, not synchronised to frames.
+  - `avdec_h264` grows by about 20 MB per hour in this mode.
+  - Tested with a synthetic stream. See [docs/KLV_STREAM.md](docs/KLV_STREAM.md).
+- **Not added, on purpose:**
+  - KLV alongside RTSP video.
+  - A map view.
+  - Frame-level KLV sync.
+  - The KLV monitor's QML screens, raw recording and PMT parsing.
+
+## 2026-11-02: Detection and newer SDK features
+
+### Added
+
+- **Object detection:** enable and disable, seven states, boxes on the video, click to select a box. Plus a **Detection
+  data** window with a live box table, summary, Pause and a 1000-packet log.
+- **Stream and FOV telemetry** in Analyze › Telemetry, shown only while a reply is fresh.
+- **Image calibration:** IR FFC auto / manual / trigger and EO one-push white balance, on models that support them.
+- **Gimbal settings:** a new Analyze tab that reads the gimbal's parameters and writes one after a confirmation.
 - `hw_vio_commands --steps detection,detection-forward`: built, not run.
-- **Stream and FOV telemetry:** Analyze › Telemetry shows `VIDEO_STREAM_INFORMATION` and `CAMERA_FOV_STATUS`, only while
-  a reply is fresh. Tested with a fake payload; not run on hardware.
-- **Image calibration:** IR FFC auto, manual and trigger, and EO one-push white balance, offered only on models whose
-  SDK header supports them. Tested with a fake payload; not run on hardware.
-- **Gimbal settings:** a new Analyze tab reads the gimbal's parameters and writes one after a confirmation. Only
-  parameters already read, and only values their type can hold. Tested with a fake payload; not run on hardware.
+- All tested only.
 
-### Fixed
+### Fixed (profile audit against the SDK)
 
-- **MB1:** focus buttons are disabled, since the SDK has no focus controls for MB1.
-- **Wrong-model warning:** Lynx and GHadron on MB1, and spellings such as "ORUS-L", no longer warn. Only VIO's reported name
-  has been seen on a real unit.
-- **EO-only models:** ZIO is no longer asked for IR FOV, IR, rangefinder and view streams.
-- **PAYLOAD lamp:** counts any MAVLink camera or gimbal ID, as the SDK does, not only 100 and 154.
-- **Capture drop count:** resets on connect, so one overflow no longer warns forever.
+- MB1 focus buttons disabled, since the SDK has no MB1 focus control.
+- Lynx and GHadron on MB1, and spellings such as "ORUS-L", no longer raise a wrong-model warning.
+- EO-only models (ZIO) are no longer asked for IR, rangefinder and view streams.
+- The PAYLOAD lamp counts any MAVLink camera or gimbal ID.
+- The capture drop count resets on connect.
 
 ### Changed
 
-- FFC mode and IR temperature streams are requested on connect on IR models, as the SDK's `ui_demo` does. Tested with a fake
-  payload; not run on hardware.
+- FFC mode and IR temperature streams are requested on connect on IR models, as the SDK's `ui_demo` does.
 - `STORAGE_TYPE` added to the MB1 camera settings.
 - Payload pages skip their refresh while hidden.
 
-### Not added, on purpose
+## 2026-10-23: VIO software 3.1.8.21 and more models
 
-- KLV alongside RTSP video: the one capture shows both in one TS, so a metadata-only receiver has no verified use yet.
-- Map view: the parser has no platform or target coordinates, and the station has no map framework.
-- Frame-level KLV synchronisation: there is no PTS mapping.
-- From the KLV monitor: QML screens, `VideoItem.h`, the A–G diagnosis, raw KLV and `.ts` recording, and PMT parsing through GStreamer's
-  debug log, which would change logging for the whole process including RTSP.
-- Forwarding a selected box to the tracker: no source confirms it works on any model.
-- Stream resolution and profile; standby and restart; OrusL SpotAE; GPS and time forwarding: their conditions
-  are not met.
+- **Added:**
+  - Gimbal speed slider.
+  - Camera settings dialog (30 VIO settings).
+  - Boot splash.
+  - ZIO, MB1 and OrusL profiles from their SDK headers.
+- **Fixed:**
+  - Tracking: send rate 0 first so the gimbal follows. Verified on a VIO.
+  - A crash on exit while video played.
+  - HEARTBEAT was being matched as a command's answer.
+- **Changed for 3.1.8.21:**
+  - Modes use the attitude flags.
+  - The control-source switch (`GB_FW_FLAG`).
+  - Rates are sent in real units.
+  - Rate and angle commands keep the reported mode.
+  - Move to angle steers by rate.
+  - All verified on a VIO.
 
-- Separate Lynx or GHadron profiles: the SDK gives them no separate IDs or values.
+## 2026-10-22: First release
 
-Reasons for each are in `docs/API_INTEGRATION.md` and `docs/SDK_FEATURE_MATRIX.md`.
+- Connection management with saved profiles and an observed-only link status.
+- MAVLink inspector: every TX/RX frame from the SDK's own socket, CRC check, decoding, filters, hex view, `.tlog` /
+  `.csv` / `.jsonl` export, and libpcap network capture.
+- VIO gimbal and camera control, telemetry, command and ACK tracking, RTSP video.
+- Install rules, `scripts/build.sh`, and the acceptance checklist.
+- The station UI: one Operate workspace (gimbal | video | camera), Analyze, a collapsible monitor and a SETTINGS drawer.
+- Checked on a VIO (3.1.4.18): 59/59 control checks passed.

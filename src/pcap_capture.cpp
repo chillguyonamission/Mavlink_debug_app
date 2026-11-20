@@ -126,7 +126,7 @@ bool PcapCapture::startLive(const QString &iface, const QString &filter, QString
     pcap_set_timeout(p, 100);
     if (const int rc = pcap_activate(p); rc < 0) {
         *error = QStringLiteral("%1: %2%3").arg(iface, QString::fromLocal8Bit(pcap_geterr(p)),
-                                               rc == PCAP_ERROR_PERM_DENIED ? QStringLiteral(" (needs root or CAP_NET_RAW, see README)") : QString());
+                                               rc == PCAP_ERROR_PERM_DENIED ? QStringLiteral(" (needs root or CAP_NET_RAW, see docs/USER_GUIDE.md)") : QString());
         pcap_close(p);
         return false;
     }

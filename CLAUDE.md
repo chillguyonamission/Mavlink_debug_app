@@ -1,9 +1,11 @@
 # Project notes for Claude Code
 
 Gremsy MAVLink debug app: a Qt 6 / C++17 desktop tool that controls Gremsy payloads through the
-official PayloadSDK and inspects the real MAVLink traffic. Read `README.md` first (design, hardware
-results, acceptance checklist, limitations). For setup on native Ubuntu, see
-`docs/INSTALL_UBUNTU.md`.
+official PayloadSDK and inspects the real MAVLink traffic. Read `README.md` first, then `docs/DEVELOPMENT_PROGRESS.md`
+(feature status, open hardware checks, limitations) and `docs/HARDWARE_RESULTS.md` (what a real VIO did). The user guide
+is `docs/USER_GUIDE.md`, the code layout `docs/ARCHITECTURE.md`. For setup on native Ubuntu, see `docs/INSTALL_UBUNTU.md`.
+When a feature or a hardware result changes, update the README status table, `docs/DEVELOPMENT_PROGRESS.md` and a dated
+`CHANGELOG.md` section.
 
 ## Status (2026-10-22)
 
@@ -55,7 +57,7 @@ results, acceptance checklist, limitations). For setup on native Ubuntu, see
   - Windows traps: `windows.h` defines `far`/`near`; Qt does not run GLib's default main context on Windows (the app
     polls GStreamer buses, so only tests were affected).
 
-- 2026-11-20 (branch `diagnostic-tool`): gamepad control (`src/gamepad.*`, `src/gamepad_page.*`, README "Gamepad"). The fixed
+- 2026-11-20 (branch `diagnostic-tool`): gamepad control (`src/gamepad.*`, `src/gamepad_page.*`, docs/USER_GUIDE.md "Gamepad"). The fixed
   Xbox layout ran on a VIO with a wired Xbox Series X pad (Linux) and the user reported every function working. Then
   Analyze › Gamepad was added from Gremsy's "Configuration Page - Gamepad control" PDF (configurable channels, invert,
   deadzone 8 %); that page has run only in tests. Windows XInput and Bluetooth are untested. The GUI test sets

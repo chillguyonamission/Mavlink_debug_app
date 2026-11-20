@@ -24,7 +24,7 @@ struct DiagCheck {
 };
 QString diagLevelText(DiagCheck::Level l);  // "PASS", "INFO", "WARN", "FAIL"
 
-// Payload core, camera, gimbal. A VIO uses 26, 100 and 154 (README "Hardware checks"); the SDK follows a camera or gimbal
+// Payload core, camera, gimbal. A VIO uses 26, 100 and 154 (docs/HARDWARE_RESULTS.md); the SDK follows a camera or gimbal
 // on any of these IDs, so another model may too.
 extern const QList<QList<quint8>> kPayloadComponents;
 
