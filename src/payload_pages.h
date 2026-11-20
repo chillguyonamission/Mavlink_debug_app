@@ -3,6 +3,7 @@
 // everything displayed as measured comes from validated RX frames (PayloadLink::telemetry()).
 
 #include "detection.h"
+#include "gamepad.h"
 
 #include <QPointF>
 #include <QWidget>
@@ -14,6 +15,7 @@
 class MavlinkDict;
 class PayloadLink;
 struct CameraSetting;
+struct ParamOption;
 struct PayloadProfile;
 class QComboBox;
 class QDialog;
@@ -54,6 +56,7 @@ class GimbalPage : public PayloadPage
     Q_OBJECT
 public:
     GimbalPage(PayloadLink *link, const MavlinkDict *dict, const PayloadProfile &profile, QWidget *parent = nullptr);
+    void gamepad(const GamepadOutput &o);  // rate at up to the speed slider; home; mode LOCK <-> FOLLOW
 
 protected:
     void refresh() override;
@@ -74,6 +77,8 @@ private:
     QTimer *m_rateTimer;
     double m_ratePitch = 0, m_rateYaw = 0;
     QPushButton *m_held = nullptr;
+    bool m_stickMoving = false;
+    qint64 m_stickSentNs = 0;
     bool m_haveCommand = false;
     double m_cmdPitch = 0, m_cmdYaw = 0;
 };
@@ -88,6 +93,7 @@ public:
     bool trackArmed() const { return m_trackArmed; }
     void trackAt(QPointF pos);  // 0..1 picture coordinates; only while armed
     void setSelectedDetection(quint16 trackId) { m_selectedDetection = trackId; }  // shown, never sent anywhere
+    void gamepad(const GamepadOutput &o);  // zoom, photo, record on/off, view and record source, tracking on/off
 
 signals:
     void trackArmedChanged(bool armed);
@@ -100,10 +106,12 @@ protected:
 private:
     QPushButton *holdButton(const QString &text, const QString &tip, bool zoom, int direction);
     void setTrackArmed(bool armed);
+    void cycleParam(const QString &label, const char *id, const std::vector<ParamOption> &options, const char *reportedName);
 
     const PayloadProfile &m_profile;
+    int m_stickZoom = 0;
     QSlider *m_zoomRange;
-    QPushButton *m_recBtn, *m_armBtn = nullptr, *m_centreBtn = nullptr;
+    QPushButton *m_recBtn, *m_armBtn = nullptr, *m_centreBtn = nullptr, *m_releaseBtn = nullptr;
     QDialog *m_detectionDialog = nullptr;
     QLabel *m_zoomReadout, *m_track = nullptr, *m_detection = nullptr;
     QLabel *m_capture, *m_video, *m_storage, *m_settings, *m_reported;

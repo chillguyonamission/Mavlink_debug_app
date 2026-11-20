@@ -69,16 +69,19 @@ target_compile_options(mavcore PRIVATE ${APP_WARNINGS})
 add_library(appcore STATIC
     src/link_health.cpp src/payload_link.cpp src/frame_model.cpp src/frame_filter.cpp
     src/frame_text.cpp src/frame_writer.cpp src/flow_stats.cpp src/mavlink_dict.cpp
-    src/command_tracker.cpp src/telemetry.cpp src/detection.cpp src/misb0601.cpp src/metadata_model.cpp src/payload_profile_vio.cpp src/payload_profile_zio.cpp src/payload_profile_mb1.cpp src/payload_profile_orusl.cpp src/profiles.cpp src/pcap_capture.cpp src/diagnostics.cpp)
+    src/command_tracker.cpp src/telemetry.cpp src/detection.cpp src/misb0601.cpp src/metadata_model.cpp src/payload_profile_vio.cpp src/payload_profile_zio.cpp src/payload_profile_mb1.cpp src/payload_profile_orusl.cpp src/profiles.cpp src/pcap_capture.cpp src/diagnostics.cpp src/gamepad.cpp)
 target_include_directories(appcore PUBLIC src ${SDK_DIR}/libs)  # libs: detection_packet.h, which has no other SDK dependency
 target_link_libraries(appcore PUBLIC Qt6::Gui mavcore PkgConfig::PCAP PRIVATE PayloadSDK)
 target_compile_options(appcore PRIVATE ${APP_WARNINGS})
+if(WIN32)
+    target_link_libraries(appcore PRIVATE xinput)  # gamepad: XInput ships with Windows
+endif()
 # XML definitions matching the generated headers; see MavlinkDict::defaultDir()
 target_compile_definitions(appcore PRIVATE
     MAVLINK_XML_DIR="${SDK_DIR}/libs/third-party/mavlink/include/mavlink/v2.0/message_definitions")
 
 # --- Widgets and the GUI application ---
-add_library(appgui STATIC src/theme.cpp src/main_window.cpp src/inspector_widget.cpp src/stats_widget.cpp src/payload_pages.cpp
+add_library(appgui STATIC src/theme.cpp src/main_window.cpp src/inspector_widget.cpp src/stats_widget.cpp src/payload_pages.cpp src/gamepad_page.cpp
     src/video_player.cpp src/video_page.cpp src/klv_receiver.cpp src/klv_page.cpp src/splash.cpp src/diagnostics_page.cpp src/web_settings_page.cpp)
 target_link_libraries(appgui PUBLIC Qt6::Widgets Qt6::Network appcore PRIVATE PkgConfig::GSTVIDEO)
 # Shown in diagnostic reports; the SDK commit is what the update check compares against upstream
@@ -125,7 +128,7 @@ target_link_libraries(test_klv_stream PRIVATE Qt6::Test appgui PkgConfig::GSTVID
 add_test(NAME klv_stream COMMAND test_klv_stream)
 set_tests_properties(klv_stream PROPERTIES TIMEOUT 300 ENVIRONMENT QT_QPA_PLATFORM=offscreen)
 
-set(APP_TESTS link_logic payload_link inspector payload_control pcap main_window detection misb0601 metadata_model diagnostics)
+set(APP_TESTS link_logic payload_link inspector payload_control pcap main_window detection misb0601 metadata_model diagnostics gamepad)
 if(WIN32)
     list(REMOVE_ITEM APP_TESTS pcap)  # calls libpcap directly; CI runners cannot install Npcap (no silent free install)
 endif()

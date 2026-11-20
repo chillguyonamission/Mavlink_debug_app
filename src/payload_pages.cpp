@@ -294,7 +294,33 @@ void GimbalPage::linkChanged()
         m_rateTimer->stop();
         m_held = nullptr;
         m_ratePitch = m_rateYaw = 0;
+        m_stickMoving = false;
     }
+}
+
+void GimbalPage::gamepad(const GamepadOutput &o)
+{
+    if (!isOpen(m_link->state())) return;
+    if (o.was(PadFunction::Home)) report(m_link->gimbalHome());
+    if (o.was(PadFunction::Mode)) {
+        const CapturedFrame *c = m_link->telemetry().latest(MAVLINK_MSG_ID_GIMBAL_DEVICE_ATTITUDE_STATUS);
+        GimbalAttitude a;
+        const bool lock = c && gimbalAttitude(c->frame, &a) && GimbalFlags::modeName(a.flags) == QLatin1String("LOCK");
+        report(m_link->gimbalMode(lock ? GimbalFlags::Change::Follow : GimbalFlags::Change::Lock,
+                                  QStringLiteral("Gimbal mode %1 (gamepad)").arg(QLatin1String(lock ? "FOLLOW" : "LOCK"))));
+    }
+    if (m_held) return;  // the on-screen pad is in use
+    const double pitch = o.pitch * m_speed->value(), roll = o.roll * m_speed->value(), yaw = o.yaw * m_speed->value();
+    if (pitch == 0 && roll == 0 && yaw == 0) {
+        if (m_stickMoving) report(m_link->gimbalRate(0, 0, 0, true));
+        m_stickMoving = false;
+        return;
+    }
+    const qint64 t = now();
+    if (m_stickMoving && t - m_stickSentNs < 100'000'000) return;  // the on-screen pad's resend interval
+    report(m_link->gimbalRate(pitch, roll, yaw, !m_stickMoving));  // track the first command only, like the pad
+    m_stickMoving = true;
+    m_stickSentNs = t;
 }
 
 void GimbalPage::refresh()
@@ -428,7 +454,7 @@ CameraPage::CameraPage(PayloadLink *link, const MavlinkDict *dict, const Payload
                               .arg(QLatin1String(m_profile.trackingModeId)), "primary");
         m_centreBtn = button(QStringLiteral("Track centre"), QStringLiteral("Track the object in the centre of the picture"));
         m_centreBtn->setEnabled(false);
-        QPushButton *release = button(QStringLiteral("Stop tracking"), QStringLiteral("Stops tracking (MAV_CMD_USER_4, mode STOP). "
+        m_releaseBtn = button(QStringLiteral("Stop tracking"), QStringLiteral("Stops tracking (MAV_CMD_USER_4, mode STOP). "
                                                                                       "The gimbal stays where it is."));
         connect(m_armBtn, &QPushButton::clicked, this, [this] {
             if (m_link->detectionEnabled()) m_link->detectionStop();  // this TRACK_MODE turns the detector off
@@ -438,7 +464,7 @@ CameraPage::CameraPage(PayloadLink *link, const MavlinkDict *dict, const Payload
             if (ok) setTrackArmed(true);
         });
         connect(m_centreBtn, &QPushButton::clicked, this, [this] { trackAt(QPointF(0.5, 0.5)); });
-        connect(release, &QPushButton::clicked, this, [this] {
+        connect(m_releaseBtn, &QPushButton::clicked, this, [this] {
             report(m_link->trackingMode(PayloadLink::TrackStop));
             setTrackArmed(false);
         });
@@ -446,7 +472,7 @@ CameraPage::CameraPage(PayloadLink *link, const MavlinkDict *dict, const Payload
         m_track->setWordWrap(true);
         tracking->addWidget(m_armBtn, 0, 0);
         tracking->addWidget(m_centreBtn, 0, 1);
-        tracking->addWidget(release, 0, 2);
+        tracking->addWidget(m_releaseBtn, 0, 2);
         tracking->addWidget(m_track, 1, 0, 1, 3);
     }
 
@@ -602,7 +628,51 @@ void CameraPage::setTrackArmed(bool armed)
 
 void CameraPage::linkChanged()
 {
-    if (!isOpen(m_link->state())) setTrackArmed(false);
+    if (!isOpen(m_link->state())) {
+        setTrackArmed(false);
+        m_stickZoom = 0;
+    }
+}
+
+void CameraPage::gamepad(const GamepadOutput &o)
+{
+    if (!isOpen(m_link->state())) return;
+    if (o.zoom != m_stickZoom) {
+        m_stickZoom = o.zoom;
+        report(m_link->cameraZoom(ZOOM_TYPE_CONTINUOUS, float(o.zoom),
+                                  o.zoom ? QStringLiteral("Zoom %1 (gamepad)").arg(o.zoom > 0 ? QStringLiteral("+") : QStringLiteral("−"))
+                                         : QStringLiteral("Zoom stop (gamepad)")));
+    }
+    if (o.was(PadFunction::Capture)) report(m_link->captureImage());
+    if (o.was(PadFunction::Record)) report(m_link->recordVideo(!m_link->operatorStatus().recording.value_or(false)));
+    if (o.was(PadFunction::View)) cycleParam(QStringLiteral("View source"), m_profile.viewSourceId, m_profile.viewSources, "VIEW_MODE");
+    if (o.was(PadFunction::RecordSource))
+        cycleParam(QStringLiteral("Record source"), m_profile.recordSourceId, m_profile.recordSources, "REC_SRC");
+    // Tele / wide: the ends of the range, as the SDK's gamepad sample does
+    if (o.was(PadFunction::ZoomTele)) report(m_link->cameraZoom(ZOOM_TYPE_RANGE, 100, QStringLiteral("Zoom tele (gamepad)")));
+    if (o.was(PadFunction::ZoomWide)) report(m_link->cameraZoom(ZOOM_TYPE_RANGE, 0, QStringLiteral("Zoom wide (gamepad)")));
+    if (o.was(PadFunction::Tracking) && m_armBtn) {  // the on-screen buttons: Select target + Track centre, or Stop tracking
+        if (m_trackArmed) {
+            m_releaseBtn->click();
+        } else {
+            m_armBtn->click();
+            if (m_trackArmed) trackAt(QPointF(0.5, 0.5));
+        }
+    }
+}
+
+// The option after the one the payload reports (the first if none is reported yet)
+void CameraPage::cycleParam(const QString &label, const char *id, const std::vector<ParamOption> &options, const char *reportedName)
+{
+    if (!id || options.empty()) return;  // not supported by this model
+    std::optional<unsigned> current;
+    const auto &params = m_link->telemetry().payloadParams();
+    for (auto it = params.cbegin(); it != params.cend(); ++it)
+        if (PayloadLink::payloadParamName(it.key()) == QLatin1String(reportedName)) current = unsigned(it->value);
+    size_t next = 0;
+    for (size_t i = 0; i < options.size(); ++i)
+        if (current && options[i].value == *current) next = (i + 1) % options.size();
+    report(m_link->cameraParam(QStringLiteral("%1: %2 (gamepad)").arg(label, QLatin1String(options[next].label)), id, options[next].value));
 }
 
 void CameraPage::trackAt(QPointF pos)

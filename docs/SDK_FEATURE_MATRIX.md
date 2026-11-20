@@ -176,4 +176,4 @@ Everything else the examples show is in the tables above.
 | `camera_ir_isotherm_profile` | Isotherm regions | On MB1, in the settings panel. Its IDs are in no VIO or OrusL header, so not offered there |
 | `gimbal_do_calib`, `gimbal_calib_auto_tune` | Gimbal calibration | Not requested, and disruptive |
 | `payload_get_video_record_status` | Record status callback | The app reads `CAMERA_CAPTURE_STATUS` instead. Its file URL is not shown |
-| `tests/gamepad_control` | Gamepad control | Not requested |
+| `tests/gamepad_control` | Gamepad control | Done, Xbox layout (README "Gamepad") |

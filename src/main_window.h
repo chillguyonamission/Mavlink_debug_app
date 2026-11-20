@@ -1,6 +1,7 @@
 #pragma once
 
 #include "captured_frame.h"
+#include "gamepad.h"
 #include "mavlink_dict.h"
 #include "profiles.h"
 #include "splash.h"
@@ -9,6 +10,7 @@
 #include <QMainWindow>
 
 class CameraPage;
+class GimbalPage;
 class DiagnosticsPage;
 class InspectorWidget;
 class PayloadLink;
@@ -47,6 +49,7 @@ private:
     void onFrames(const std::vector<CapturedFrame> &frames);
     void refreshStats(bool tick = false);  // tick: the 1 Hz timer, which also samples the rates
     void refreshOperator();                // 4 Hz: lamps, warnings and the video overlay
+    void pollGamepad();                    // 50 Hz: the pad drives the gimbal and camera pages through Analyze › Gamepad's mapping
     void setDrawerOpen(bool open);
     void saveSettings() const;
     void reloadProfiles(const QString &select = {});
@@ -62,6 +65,11 @@ private:
     DiagnosticsPage *m_diag;
     VideoPage *m_video;
     CameraPage *m_camera = nullptr;
+    GimbalPage *m_gimbal = nullptr;
+    Gamepad m_gamepad;
+    GamepadState m_pad;
+    QLabel *m_padLabel;
+    class GamepadPage *m_padPage;
     const PayloadProfile *m_profile = nullptr;
     QScrollArea *m_gimbalCol, *m_cameraCol, *m_settingsCol;
     QWidget *m_settingsPanel;

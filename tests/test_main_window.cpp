@@ -42,6 +42,7 @@ private slots:
     void initTestCase()
     {
         QStandardPaths::setTestModeEnabled(true);  // QSettings go to a test location
+        qputenv("MAVLINK_DEBUG_NO_GAMEPAD", "1");  // a pad plugged into this PC would send gimbal rates mid-test
         QCoreApplication::setOrganizationName(QStringLiteral("GremsyTest"));
         QSettings().clear();  // e.g. the model a previous run connected with
         applyTheme(*qApp);  // screenshots show the real look
@@ -219,6 +220,55 @@ private slots:
         QTest::mouseRelease(up, Qt::LeftButton);
         QVERIFY(sent([](const MavFrame &f) {
             return f.msgid == MAVLINK_MSG_ID_GIMBAL_DEVICE_SET_ATTITUDE && mavlink_msg_gimbal_device_set_attitude_get_angular_velocity_y(&f.msg) == 0;
+        }));
+
+        // Gamepad: full left stick up = the slider's speed, centred = zero rate; right stick up = zoom tele, centred = stop
+        auto *gimbal = w.findChild<GimbalPage *>();
+        QVERIFY(gimbal);
+        GamepadConfig pad;  // the default assignment
+        GamepadState idle;
+        idle.connected = true;
+        GamepadState stick = idle;
+        stick[PadChannel::LY] = 1;
+        gimbal->gamepad(gamepadOutput(pad, idle, stick));
+        QVERIFY(sent([](const MavFrame &f) {
+            return f.msgid == MAVLINK_MSG_ID_GIMBAL_DEVICE_SET_ATTITUDE &&
+                   std::abs(mavlink_msg_gimbal_device_set_attitude_get_angular_velocity_y(&f.msg) - float(30 * M_PI / 180)) < 1e-4f;
+        }));
+        fake.received();
+        gimbal->gamepad(gamepadOutput(pad, stick, idle));
+        QVERIFY(sent([](const MavFrame &f) {
+            return f.msgid == MAVLINK_MSG_ID_GIMBAL_DEVICE_SET_ATTITUDE && mavlink_msg_gimbal_device_set_attitude_get_angular_velocity_y(&f.msg) == 0;
+        }));
+        auto zoomCmd = [](const MavFrame &f, float value) {
+            return f.msgid == MAVLINK_MSG_ID_COMMAND_LONG && mavlink_msg_command_long_get_command(&f.msg) == MAV_CMD_SET_CAMERA_ZOOM &&
+                   mavlink_msg_command_long_get_param1(&f.msg) == ZOOM_TYPE_CONTINUOUS && mavlink_msg_command_long_get_param2(&f.msg) == value;
+        };
+        stick = idle;
+        stick[PadChannel::RY] = 0.8;
+        camera->gamepad(gamepadOutput(pad, idle, stick));
+        QVERIFY(sent([&](const MavFrame &f) { return zoomCmd(f, 1); }));
+        camera->gamepad(gamepadOutput(pad, stick, idle));
+        QVERIFY(sent([&](const MavFrame &f) { return zoomCmd(f, 0); }));
+        // A reassigned channel: LB to Zoom tele, as in the document's example, sends the tele end of the range
+        QVERIFY(pad.assign(PadChannel::LB, PadFunction::ZoomTele));
+        stick = idle;
+        stick[PadChannel::LB] = 1;
+        camera->gamepad(gamepadOutput(pad, idle, stick));
+        QVERIFY(sent([](const MavFrame &f) {
+            return f.msgid == MAVLINK_MSG_ID_COMMAND_LONG && mavlink_msg_command_long_get_command(&f.msg) == MAV_CMD_SET_CAMERA_ZOOM &&
+                   mavlink_msg_command_long_get_param1(&f.msg) == ZOOM_TYPE_RANGE && mavlink_msg_command_long_get_param2(&f.msg) == 100;
+        }));
+        // RB while the gimbal reports LOCK: FOLLOW (mode flags 0, no angle)
+        GamepadState rb = idle;
+        rb[PadChannel::RB] = 1;
+        fake.received();
+        gimbal->gamepad(gamepadOutput(pad, idle, rb));
+        QVERIFY(sent([](const MavFrame &f) {
+            if (f.msgid != MAVLINK_MSG_ID_GIMBAL_DEVICE_SET_ATTITUDE) return false;
+            float q[4];
+            mavlink_msg_gimbal_device_set_attitude_get_q(&f.msg, q);
+            return std::isnan(q[0]) && mavlink_msg_gimbal_device_set_attitude_get_flags(&f.msg) == 0;
         }));
 
         // Mode buttons: the mode flags in GIMBAL_DEVICE_SET_ATTITUDE (the gimbal reported LOCK above), no angle

@@ -55,9 +55,15 @@ results, acceptance checklist, limitations). For setup on native Ubuntu, see
   - Windows traps: `windows.h` defines `far`/`near`; Qt does not run GLib's default main context on Windows (the app
     polls GStreamer buses, so only tests were affected).
 
+- 2026-11-20 (branch `diagnostic-tool`): gamepad control (`src/gamepad.*`, `src/gamepad_page.*`, README "Gamepad"). The fixed
+  Xbox layout ran on a VIO with a wired Xbox Series X pad (Linux) and the user reported every function working. Then
+  Analyze › Gamepad was added from Gremsy's "Configuration Page - Gamepad control" PDF (configurable channels, invert,
+  deadzone 8 %); that page has run only in tests. Windows XInput and Bluetooth are untested. The GUI test sets
+  `MAVLINK_DEBUG_NO_GAMEPAD` so a plugged-in pad cannot move it.
+
 ## Next steps
 
-1. Native build: `scripts/build.sh` should report 14/14 tests passing. If it fails with a `CMakeCache.txt` path error, the
+1. Native build: `scripts/build.sh` should report 15/15 tests passing. If it fails with a `CMakeCache.txt` path error, the
    repository moved: run `cmake --fresh -S . -B build`. Build into `build/` so the user's binary has the work.
 2. On native Linux, verify RTSP over UDP and live network capture (both impossible under WSL2).
    `ffmpeg -rtsp_transport udp` got only 3 frames on 2026-10-23 (TCP fine). The laptop then had two

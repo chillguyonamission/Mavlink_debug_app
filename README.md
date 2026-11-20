@@ -399,6 +399,40 @@ Notes:
   Gremsy's `ui_demo` rates. These are read requests only, listed on the Commands tab with an
   `Auto:` prefix.
 
+### Gamepad
+
+A USB gamepad drives the Operate controls while the link is open. It was written for and run with an Xbox Series X pad.
+Plug it in at any time; the status bar shows its name. **Analyze › Gamepad** is the configuration page from Gremsy's
+"Configuration Page - Gamepad control" document (Payload Plus 1.2.3), with the same panels, functions, defaults and rules:
+
+- **Channels:** A, B, X, Y, LB, RB, BACK, START, XBOX (the guide button; Linux only, XInput does not report it), L3, R3,
+  LX, LY, RX, RY, LT, RT, DPAD_X, DPAD_Y.
+- **SET CHANNEL:** pick a channel (from the list or by clicking it in CHANNELS), pick a function, press **SET**. One
+  function, one channel: a function already elsewhere moves, and that channel becomes None. Buttons are not offered the
+  continuous functions. **Reset default** restores the table below, INVERT off and DEADZONE 8 %, at once.
+- **JOYSTICK:** INVERT and DEADZONE (0–30 %, default 8 %) per stick axis, applied at once.
+- **ANALOG INPUT:** both sticks (deadzone applied, not inverted) and the LT / RT travel. **CHANNELS:** the pad with each
+  control's function; a control lights up while pressed.
+- Everything is saved in the app's settings and restored at the next start.
+
+| Function | What the app sends |
+|---|---|
+| Gimbal pitch / yaw / roll | Rate; full travel = the **Speed** slider; resent every 100 ms, zero when released. The on-screen pad wins while held. |
+| Zoom | Continuous zoom tele / wide past half travel, stop when released |
+| Gimbal home | The RESET button |
+| Gimbal mode | LOCK ↔ FOLLOW, from the mode the gimbal reports |
+| Capture image / Record video | Photo; record start, or stop while the camera reports recording |
+| Change view / Change record | The next view / record source after the one the payload reports (models that support it) |
+| Tracking | Off: **Select target** then **Track centre**. On: **Stop tracking** |
+| Zoom tele / Zoom wide | Zoom range 100 % / 0 %, as the SDK's gamepad sample does (the document says "one step") |
+
+Default: A home, B capture, X record, Y change view, LB change record, RB gimbal mode, START tracking, LX yaw, LY pitch,
+RY zoom; the rest None. A trigger or D-pad channel given a press function fires past half its travel.
+
+- **Linux:** reads `/dev/input/event*` (any pad with `BTN_SOUTH`; run with USB `xpad`, Bluetooth untested). The desktop
+  user can read it through systemd's `uaccess` rule; elsewhere, add the user to the `input` group.
+- **Windows:** XInput (part of Windows; the first of the four slots in use).
+
 ### Command states
 
 | State | Meaning |

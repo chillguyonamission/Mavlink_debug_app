@@ -21,6 +21,8 @@ QLabel#readoutCaption { color: @Dim; font-size: 8pt; font-weight: 600; }
 
 QGroupBox { border: 1px solid @Border; border-radius: 4px; margin-top: 16px; padding: 6px 4px 4px 4px; }
 QGroupBox::title { subcontrol-origin: margin; left: 8px; padding: 0 4px; color: @Dim; font-size: 8pt; font-weight: 700; }
+QCheckBox::indicator { width: 13px; height: 13px; border: 1px solid @Dim; border-radius: 3px; background: @Raised; }
+QCheckBox::indicator:checked { background: @Accent; border-color: @Accent; }
 
 QPushButton { background: @Raised; color: @Text; border: 1px solid #2a3b57; border-radius: 3px; padding: 5px 10px; }
 QPushButton:hover { border-color: @Accent; }

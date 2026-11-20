@@ -7,6 +7,13 @@ Newest first. "Tested" means the hardware-free CTest suite unless a line says ha
 
 ### Added
 
+- **Gamepad control** (run with an Xbox Series X pad) and **Analyze › Gamepad**, the configuration page from Gremsy's gamepad
+  document: any function on any of 19 channels (one function per channel), INVERT and DEADZONE per stick axis, live
+  sticks and triggers, the pad picture with each control's function, saved between runs. Functions: gimbal pitch / yaw /
+  roll rate, zoom, home, LOCK/FOLLOW, photo, record, view and record source, tracking on/off, zoom tele / wide. Linux
+  reads evdev, Windows XInput; no new dependency. Hardware: the user ran the fixed Xbox layout on a VIO (Linux) with all
+  functions working; the configuration page, roll, triggers, D-pad, tracking and tele / wide have run only in tests. The
+  Windows reader only builds in CI; Bluetooth is untested.
 - **DIAGNOSE view.** Health check (link, each payload part's heartbeat and state, decoded gimbal failure flags, model,
   payload value stream, frame and send errors, sequence gaps, failed commands), a read-only network check (PC
   adapters on the payload's subnet, its TCP services, its software list from the web app), an SDK update check

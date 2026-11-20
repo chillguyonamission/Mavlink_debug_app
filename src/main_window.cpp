@@ -1,5 +1,7 @@
 #include "main_window.h"
 
+#include "gamepad_page.h"
+
 #include "diagnostics_page.h"
 #include "inspector_widget.h"
 #include "payload_pages.h"
@@ -339,6 +341,8 @@ MainWindow::MainWindow(QWidget *parent)
     tabs->addTab(new GimbalSettingsPage(m_link, dict), QStringLiteral("Gimbal settings"));
     tabs->addTab(m_statsPage, QStringLiteral("Statistics"));
     tabs->addTab(new KlvPage(m_video->klvReceiver(), m_video->klvModel()), QStringLiteral("KLV"));
+    m_padPage = new GamepadPage;
+    tabs->addTab(m_padPage, QStringLiteral("Gamepad"));
 
     // --- Diagnose ---
     m_diag = new DiagnosticsPage(
@@ -423,6 +427,9 @@ MainWindow::MainWindow(QWidget *parent)
 
     m_captureLabel = new QLabel;
     statusBar()->addWidget(m_captureLabel);
+    m_padLabel = new QLabel;
+    m_padLabel->setToolTip(QStringLiteral("Button and stick functions: Analyze › Gamepad"));
+    statusBar()->addPermanentWidget(m_padLabel);
     statusBar()->addPermanentWidget(new QLabel(
         m_dict.isLoaded() ? QStringLiteral("Definitions: %1 (%2 files)").arg(MavlinkDict::defaultDir()).arg(m_dict.files().size())
                           : colored(QStringLiteral("MAVLink XML not loaded: %1. Units and enum names unavailable.")
@@ -456,6 +463,9 @@ MainWindow::MainWindow(QWidget *parent)
     auto *hud = new QTimer(this);
     connect(hud, &QTimer::timeout, this, &MainWindow::refreshOperator);
     hud->start(250);
+    auto *pad = new QTimer(this);
+    connect(pad, &QTimer::timeout, this, &MainWindow::pollGamepad);
+    if (!qEnvironmentVariableIsSet("MAVLINK_DEBUG_NO_GAMEPAD")) pad->start(20);  // set by the GUI test: a real pad must not move it
 
     // Restore the layout (each restore ignores invalid data)
     resize(1440, 900);
@@ -586,12 +596,25 @@ void MainWindow::setModel(const PayloadProfile &p)
     connect(m_camera, &CameraPage::trackArmedChanged, m_video->view(), &VideoView::setPickMode);
     connect(m_camera, &CameraPage::settingsToggled, this, &MainWindow::showCameraSettings);
     showCameraSettings(false);  // the new camera page's button starts unchecked
-    for (const auto &[col, page] : {std::pair<QScrollArea *, QWidget *>{m_gimbalCol, new GimbalPage(m_link, dict, p)}, {m_cameraCol, m_camera},
+    m_gimbal = new GimbalPage(m_link, dict, p);
+    for (const auto &[col, page] : {std::pair<QScrollArea *, QWidget *>{m_gimbalCol, m_gimbal}, {m_cameraCol, m_camera},
                                     {m_settingsCol, new CameraSettingsPage(m_link, dict, p)}}) {
         col->setWidget(page);  // deletes the previous page
         page->setAutoFillBackground(false);  // setWidget() turned it on; the panel colour shows through
     }
     m_subtitle->setText(QStringLiteral("Gremsy %1 · PayloadSDK · MAVLink").arg(QLatin1String(p.name)));
+}
+
+void MainWindow::pollGamepad()
+{
+    const GamepadState s = m_gamepad.poll();
+    if (s.connected != m_pad.connected || s.name != m_pad.name)
+        m_padLabel->setText(s.connected ? QStringLiteral("Gamepad: %1").arg(s.name.toHtmlEscaped()) : QString());
+    m_padPage->setState(s);
+    const GamepadOutput o = gamepadOutput(m_padPage->config(), m_pad, s);
+    m_pad = s;
+    if (m_gimbal) m_gimbal->gamepad(o);
+    if (m_camera) m_camera->gamepad(o);
 }
 
 std::vector<BootCheck> MainWindow::bootChecks() const
