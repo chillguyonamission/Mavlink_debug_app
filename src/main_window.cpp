@@ -1,17 +1,26 @@
 #include "main_window.h"
 
+#include "gamepad_page.h"
+
+#include "diagnostics_page.h"
 #include "inspector_widget.h"
 #include "payload_pages.h"
 #include "payload_profile.h"
 #include "payload_link.h"
 #include "stats_widget.h"
 #include "ui_util.h"
+#include "klv_page.h"
+#include "klv_receiver.h"
 #include "video_page.h"
 #include "video_player.h"
+#include "web_settings_page.h"
 
+#include <QApplication>
 #include <QButtonGroup>
 #include <QCloseEvent>
 #include <QComboBox>
+#include <QDateTime>
+#include <QSysInfo>
 #include <QInputDialog>
 #include <QMessageBox>
 #include <QHBoxLayout>
@@ -31,12 +40,6 @@
 
 static const char *kDefaultIp = "192.168.55.1";  // PayloadSDK v3 README default
 static const int kDefaultPort = 14566;
-// Payload core, camera, gimbal. A VIO uses 26, 100 and 154 (README "Hardware checks"); the SDK follows a camera or gimbal
-// on any of these IDs, so another model may too.
-static const QList<QList<quint8>> kPayloadComponents{
-    {TelemetryStore::kPayloadCore},
-    {MAV_COMP_ID_CAMERA, MAV_COMP_ID_CAMERA2, MAV_COMP_ID_CAMERA3, MAV_COMP_ID_CAMERA4, MAV_COMP_ID_CAMERA5, MAV_COMP_ID_CAMERA6},
-    {MAV_COMP_ID_GIMBAL, MAV_COMP_ID_GIMBAL2, MAV_COMP_ID_GIMBAL3, MAV_COMP_ID_GIMBAL4, MAV_COMP_ID_GIMBAL5, MAV_COMP_ID_GIMBAL6}};
 
 static const char *lampColor(Lamp l)
 {
@@ -127,6 +130,7 @@ MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent), m_link(new PayloadLink(this))
 {
     setWindowTitle(QStringLiteral("Payload Control Station"));
+    qApp->installEventFilter(this);
 
     // --- Connection fields (settings drawer) ---
     m_ip = new QLineEdit;
@@ -235,6 +239,9 @@ MainWindow::MainWindow(QWidget *parent)
     });
     m_gimbalCol = column(new QWidget);  // pages: setModel()
     m_cameraCol = column(new QWidget);
+    m_settingsCol = column(new QWidget);
+    m_settingsPanel = panel(QStringLiteral("CAMERA SETTINGS"), m_settingsCol);
+    m_settingsPanel->hide();
 
     auto *videoRow = new QHBoxLayout;
     auto *videoTitle = new QLabel(QStringLiteral("VIDEO"));
@@ -242,6 +249,12 @@ MainWindow::MainWindow(QWidget *parent)
     videoTitle->setMinimumWidth(90);
     videoRow->addWidget(videoTitle);
     videoRow->addWidget(m_video->settingsPanel(), 1);  // moved out of the video panel to keep the picture large
+    auto *klvRow = new QHBoxLayout;
+    auto *klvTitle = new QLabel(QStringLiteral("RTP/TS + KLV"));
+    klvTitle->setObjectName(QStringLiteral("readoutCaption"));
+    klvTitle->setMinimumWidth(90);
+    klvRow->addWidget(klvTitle);
+    klvRow->addWidget(m_video->klvSettingsPanel(), 1);
 
     m_drawer = new QFrame;
     m_drawer->setObjectName(QStringLiteral("drawer"));
@@ -252,6 +265,7 @@ MainWindow::MainWindow(QWidget *parent)
     dl->addWidget(m_statsLabel);
     dl->addWidget(m_heartbeatLabel);
     dl->addLayout(videoRow);
+    dl->addLayout(klvRow);
 
     // --- Header ---
     auto *title = new QLabel(QStringLiteral("PAYLOAD CONTROL STATION"));
@@ -266,9 +280,10 @@ MainWindow::MainWindow(QWidget *parent)
     m_nav = new QButtonGroup(this);
     auto *nav = new QHBoxLayout;
     nav->setSpacing(0);
-    for (const auto &[id, text, name] : {std::tuple{0, "OPERATE", "navOperate"}, std::tuple{1, "ANALYZE", "navAnalyze"}}) {
-        QPushButton *b = button(QLatin1String(text), id ? QStringLiteral("Command log, payload telemetry and traffic statistics")
-                                                        : QStringLiteral("Video with gimbal and camera control"), "segment");
+    for (const auto &[id, text, name, tip] : {std::tuple{0, "OPERATE", "navOperate", "Video with gimbal and camera control"},
+                                              std::tuple{1, "ANALYZE", "navAnalyze", "Command log, payload telemetry and traffic statistics"},
+                                              std::tuple{2, "DIAGNOSE", "navDiagnose", "Health check, network check, payload web settings and a report"}}) {
+        QPushButton *b = button(QLatin1String(text), QLatin1String(tip), "segment");
         b->setObjectName(QLatin1String(name));
         b->setCheckable(true);
         b->setMinimumWidth(96);
@@ -325,10 +340,50 @@ MainWindow::MainWindow(QWidget *parent)
     tabs->addTab(new TelemetryPage(m_link, dict), QStringLiteral("Telemetry"));
     tabs->addTab(new GimbalSettingsPage(m_link, dict), QStringLiteral("Gimbal settings"));
     tabs->addTab(m_statsPage, QStringLiteral("Statistics"));
+    tabs->addTab(new KlvPage(m_video->klvReceiver(), m_video->klvModel()), QStringLiteral("KLV"));
+    m_padPage = new GamepadPage;
+    tabs->addTab(m_padPage, QStringLiteral("Gamepad"));
+
+    // --- Diagnose ---
+    m_diag = new DiagnosticsPage(
+        [this] {
+            DiagInput in;
+            in.state = m_link->state();
+            in.nowMs = PayloadLink::monoNs() / 1000000;
+            in.timeoutMs = m_link->timeoutMs();
+            in.heartbeats = m_link->heartbeatSources();
+            in.telemetry = &m_link->telemetry();
+            in.traffic = m_stats;
+            in.captureDrops = m_link->droppedDatagrams();
+            in.flows = &m_statsPage->flows();
+            in.tracker = &m_link->tracker();
+            in.dict = m_dict.isLoaded() ? &m_dict : nullptr;
+            in.profile = m_profile;
+            return in;
+        },
+        [this] {
+            return QStringList{QStringLiteral("Gremsy payload diagnostic report"),
+                               QStringLiteral("Date: %1").arg(QDateTime::currentDateTime().toString(Qt::ISODate)),
+                               QStringLiteral("App: %1 (%2)").arg(QStringLiteral(APP_GIT), QSysInfo::prettyProductName()),
+                               QStringLiteral("Payload: %1, model set to %2").arg(m_link->target().isEmpty() ? m_ip->text() : m_link->target(),
+                                                                                    QString::fromLatin1(m_profile->name)),
+                               QStringLiteral("Link: %1").arg(linkStateText(m_link->state()))};
+        });
+    connect(m_ip, &QLineEdit::textChanged, m_diag, &DiagnosticsPage::setPayloadIp);
+    m_diag->setPayloadIp(m_ip->text());
+    auto *diagTabs = new QTabWidget;
+    diagTabs->setObjectName(QStringLiteral("diagnoseTabs"));
+    diagTabs->setDocumentMode(true);
+    diagTabs->addTab(m_diag, QStringLiteral("Health check"));
+    auto *web = new WebSettingsPage;
+    connect(m_ip, &QLineEdit::textChanged, web, &WebSettingsPage::setPayloadIp);
+    web->setPayloadIp(m_ip->text());
+    diagTabs->addTab(web, QStringLiteral("Web settings"));
 
     m_views = new QStackedWidget;
     m_views->addWidget(m_hsplit);
     m_views->addWidget(tabs);
+    m_views->addWidget(diagTabs);
     connect(m_nav, &QButtonGroup::idClicked, m_views, &QStackedWidget::setCurrentIndex);
 
     m_monitor = panel({}, m_inspector);
@@ -336,6 +391,7 @@ MainWindow::MainWindow(QWidget *parent)
     m_vsplit->setChildrenCollapsible(false);
     m_vsplit->addWidget(m_views);
     m_vsplit->addWidget(m_monitor);
+    m_vsplit->addWidget(m_settingsPanel);  // last, so a saved two-pane layout still fits
     m_vsplit->setStretchFactor(0, 1);
     m_vsplit->setStretchFactor(1, 0);
     m_vsplit->setSizes({620, 240});
@@ -371,6 +427,9 @@ MainWindow::MainWindow(QWidget *parent)
 
     m_captureLabel = new QLabel;
     statusBar()->addWidget(m_captureLabel);
+    m_padLabel = new QLabel;
+    m_padLabel->setToolTip(QStringLiteral("Button and stick functions: Analyze › Gamepad"));
+    statusBar()->addPermanentWidget(m_padLabel);
     statusBar()->addPermanentWidget(new QLabel(
         m_dict.isLoaded() ? QStringLiteral("Definitions: %1 (%2 files)").arg(MavlinkDict::defaultDir()).arg(m_dict.files().size())
                           : colored(QStringLiteral("MAVLink XML not loaded: %1. Units and enum names unavailable.")
@@ -397,19 +456,23 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_link, &PayloadLink::stateChanged, this, &MainWindow::onStateChanged);
     connect(m_link, &PayloadLink::framesCaptured, this, &MainWindow::onFrames);
     connect(m_video->player(), &VideoPlayer::stateChanged, this, &MainWindow::refreshOperator);
+    connect(m_video->klvReceiver(), &KlvReceiver::stateChanged, this, &MainWindow::refreshOperator);
     auto *tick = new QTimer(this);
     connect(tick, &QTimer::timeout, this, [this] { refreshStats(true); });
     tick->start(1000);
     auto *hud = new QTimer(this);
     connect(hud, &QTimer::timeout, this, &MainWindow::refreshOperator);
     hud->start(250);
+    auto *pad = new QTimer(this);
+    connect(pad, &QTimer::timeout, this, &MainWindow::pollGamepad);
+    if (!qEnvironmentVariableIsSet("MAVLINK_DEBUG_NO_GAMEPAD")) pad->start(20);  // set by the GUI test: a real pad must not move it
 
     // Restore the layout (each restore ignores invalid data)
     resize(1440, 900);
     restoreGeometry(s.value(QStringLiteral("ui/geometry")).toByteArray());
     m_hsplit->restoreState(s.value(QStringLiteral("ui/hsplit")).toByteArray());
     m_vsplit->restoreState(s.value(QStringLiteral("ui/vsplit")).toByteArray());
-    const int view = qBound(0, s.value(QStringLiteral("ui/view")).toInt(), 1);
+    const int view = qBound(0, s.value(QStringLiteral("ui/view")).toInt(), 2);
     m_nav->button(view)->setChecked(true);
     m_views->setCurrentIndex(view);
     m_inspector->setCollapsed(s.value(QStringLiteral("ui/monitorCollapsed"), false).toBool());
@@ -428,6 +491,7 @@ MainWindow::~MainWindow()
 
 void MainWindow::closeEvent(QCloseEvent *e)
 {
+    showCameraSettings(false);  // the saved layout is the monitor's, and the panel starts closed
     saveSettings();
     e->accept();
 }
@@ -493,6 +557,34 @@ void MainWindow::deleteProfile()
     reloadProfiles();
 }
 
+// Qt sends a combo's activated() on the wheel, and a combo here sends a command: scrolling a column past one must not.
+// Ignored, the event goes on to the scroll area.
+bool MainWindow::eventFilter(QObject *o, QEvent *e)
+{
+    if (e->type() == QEvent::Wheel && qobject_cast<QComboBox *>(o)) {
+        e->ignore();
+        return true;
+    }
+    return QMainWindow::eventFilter(o, e);
+}
+
+// Takes the monitor's place under the video. Beside it, a 1440 px window would leave the picture 468 px wide; here
+// it loses only the letterbox bars.
+void MainWindow::showCameraSettings(bool show)
+{
+    if (show == m_settingsPanel->isVisible()) return;
+    if (show) {
+        m_sizesBeforeSettings = m_vsplit->sizes();
+        m_monitor->hide();
+        m_settingsPanel->show();
+        m_vsplit->setSizes({m_vsplit->height() - kSettingsPanelHeight, 0, kSettingsPanelHeight});
+    } else {
+        m_settingsPanel->hide();
+        m_monitor->show();
+        m_vsplit->setSizes(m_sizesBeforeSettings);
+    }
+}
+
 void MainWindow::setModel(const PayloadProfile &p)
 {
     m_profile = &p;
@@ -502,11 +594,27 @@ void MainWindow::setModel(const PayloadProfile &p)
     m_video->view()->selectDetection(0);
     m_camera = new CameraPage(m_link, dict, p);
     connect(m_camera, &CameraPage::trackArmedChanged, m_video->view(), &VideoView::setPickMode);
-    for (const auto &[col, page] : {std::pair<QScrollArea *, QWidget *>{m_gimbalCol, new GimbalPage(m_link, dict, p)}, {m_cameraCol, m_camera}}) {
+    connect(m_camera, &CameraPage::settingsToggled, this, &MainWindow::showCameraSettings);
+    showCameraSettings(false);  // the new camera page's button starts unchecked
+    m_gimbal = new GimbalPage(m_link, dict, p);
+    for (const auto &[col, page] : {std::pair<QScrollArea *, QWidget *>{m_gimbalCol, m_gimbal}, {m_cameraCol, m_camera},
+                                    {m_settingsCol, new CameraSettingsPage(m_link, dict, p)}}) {
         col->setWidget(page);  // deletes the previous page
         page->setAutoFillBackground(false);  // setWidget() turned it on; the panel colour shows through
     }
     m_subtitle->setText(QStringLiteral("Gremsy %1 · PayloadSDK · MAVLink").arg(QLatin1String(p.name)));
+}
+
+void MainWindow::pollGamepad()
+{
+    const GamepadState s = m_gamepad.poll();
+    if (s.connected != m_pad.connected || s.name != m_pad.name)
+        m_padLabel->setText(s.connected ? QStringLiteral("Gamepad: %1").arg(s.name.toHtmlEscaped()) : QString());
+    m_padPage->setState(s);
+    const GamepadOutput o = gamepadOutput(m_padPage->config(), m_pad, s);
+    m_pad = s;
+    if (m_gimbal) m_gimbal->gamepad(o);
+    if (m_camera) m_camera->gamepad(o);
 }
 
 std::vector<BootCheck> MainWindow::bootChecks() const
@@ -638,6 +746,23 @@ void MainWindow::refreshOperator()
     }
     m_videoLamp->setText(lampText(QStringLiteral("VIDEO"), vl, vd));
     m_videoLamp->setToolTip(v->state() == VideoPlayer::State::Error ? v->error() : QStringLiteral("RTSP video stream"));
+    if (m_video->klvSelected()) {
+        const KlvReceiver *k = m_video->klvReceiver();
+        Lamp kl = Lamp::Warn;
+        QString kd = QStringLiteral("waiting");
+        switch (k->state()) {
+        case KlvReceiver::State::Stopped: kl = Lamp::Off; kd = QStringLiteral("off"); break;
+        case KlvReceiver::State::Waiting: break;
+        case KlvReceiver::State::Receiving: kd = QStringLiteral("no frames"); break;
+        case KlvReceiver::State::KlvOnly: kd = QStringLiteral("no video"); break;
+        case KlvReceiver::State::Decoding:
+        case KlvReceiver::State::NoKlvPad: kl = Lamp::Ok; kd = QStringLiteral("%1 fps").arg(k->videoFps(), 0, 'f', 0); break;
+        case KlvReceiver::State::Error:
+        case KlvReceiver::State::Failed: kl = Lamp::Bad; kd = QStringLiteral("error"); break;
+        }
+        m_videoLamp->setText(lampText(QStringLiteral("VIDEO"), kl, kd));
+        m_videoLamp->setToolTip(QStringLiteral("RTP/TS video + KLV: %1").arg(KlvReceiver::stateText(k->state())));
+    }
 
     // Warnings: only conditions observed on the link
     const OperatorStatus o = m_link->operatorStatus();

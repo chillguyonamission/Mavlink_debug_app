@@ -1,9 +1,11 @@
 # Project notes for Claude Code
 
 Gremsy MAVLink debug app: a Qt 6 / C++17 desktop tool that controls Gremsy payloads through the
-official PayloadSDK and inspects the real MAVLink traffic. Read `README.md` first (design, hardware
-results, acceptance checklist, limitations). For setup on native Ubuntu, see
-`docs/INSTALL_UBUNTU.md`.
+official PayloadSDK and inspects the real MAVLink traffic. Read `README.md` first, then `docs/DEVELOPMENT_PROGRESS.md`
+(feature status, open hardware checks, limitations) and `docs/HARDWARE_RESULTS.md` (what a real VIO did). The user guide
+is `docs/USER_GUIDE.md`, the code layout `docs/ARCHITECTURE.md`. For setup on native Ubuntu, see `docs/INSTALL_UBUNTU.md`.
+When a feature or a hardware result changes, update the README status table, `docs/DEVELOPMENT_PROGRESS.md` and a dated
+`CHANGELOG.md` section.
 
 ## Status (2026-10-22)
 
@@ -38,9 +40,32 @@ results, acceptance checklist, limitations). For setup on native Ubuntu, see
 - 2026-11-02, later: audited the payload profiles against the SDK. Four targets, four profiles, none missing; Lynx and GHadron
   use MB1. Coverage matrix in `docs/SDK_FEATURE_MATRIX.md`. **ZIO, MB1 and OrusL still never ran on hardware.**
 
+- 2026-11-03: RTP/TS video + KLV integrated from `Gremsy_KLV_streamer` (`docs/KLV_STREAM.md`). **Tested only against a synthetic stream;**
+  no payload was reachable. Open hardware checks are in `docs/DEVELOPMENT_PROGRESS.md`.
+
+- 2026-11-04: stream bitrate presets for EO and IR. **Tested only against the fake payload.** See `docs/API_INTEGRATION.md`.
+
+- 2026-11-04, later: camera settings moved from a floating window to a panel under the video, replacing the MAVLink monitor until closed. The wheel no
+  longer changes combos. Tested only offscreen against the fake payload. The real app ran live on a VIO with **3.1.9.24**: heartbeat, RTP/TS and KLV work.
+  That unit has RTSP off, and sends KLV over UDP unicast to `192.168.55.100:8554`, so the Address must be that, not the default multicast group.
+
+- 2026-11-13 (branch `diagnostic-tool`): becoming a portable Windows + Linux diagnostic tool.
+  - PayloadSDK at `2021d9f`; reboot fix (streams re-requested after stale). Not re-verified on hardware (user skipped it).
+  - Windows port: `patches/payloadsdk-windows.patch` (applied after the observer patch), CI on Ubuntu + Windows (MSVC).
+  - DIAGNOSE view (health check, network check, SDK update check, report, Web settings tab) and CI packages
+    (Windows zip, AppImage). All tested only in CI and against loopback, not on a payload or a Windows PC.
+  - Windows traps: `windows.h` defines `far`/`near`; Qt does not run GLib's default main context on Windows (the app
+    polls GStreamer buses, so only tests were affected).
+
+- 2026-11-20 (branch `diagnostic-tool`): gamepad control (`src/gamepad.*`, `src/gamepad_page.*`, docs/USER_GUIDE.md "Gamepad"). The fixed
+  Xbox layout ran on a VIO with a wired Xbox Series X pad (Linux) and the user reported every function working. Then
+  Analyze › Gamepad was added from Gremsy's "Configuration Page - Gamepad control" PDF (configurable channels, invert,
+  deadzone 8 %); that page has run only in tests. Windows XInput and Bluetooth are untested. The GUI test sets
+  `MAVLINK_DEBUG_NO_GAMEPAD` so a plugged-in pad cannot move it.
+
 ## Next steps
 
-1. Native build: `scripts/build.sh` should report 10/10 tests passing. If it fails with a `CMakeCache.txt` path error, the
+1. Native build: `scripts/build.sh` should report 15/15 tests passing. If it fails with a `CMakeCache.txt` path error, the
    repository moved: run `cmake --fresh -S . -B build`. Build into `build/` so the user's binary has the work.
 2. On native Linux, verify RTSP over UDP and live network capture (both impossible under WSL2).
    `ffmpeg -rtsp_transport udp` got only 3 frames on 2026-10-23 (TCP fine). The laptop then had two
@@ -62,6 +87,7 @@ results, acceptance checklist, limitations). For setup on native Ubuntu, see
     changing `RC_MODE` (a persistent setting). Re-ask for these.
   - **Not yet approved (new, 2026-11-02):** `TRACK_MODE` = detection, `hw_vio_commands --steps detection` or
     `detection-forward`, FFC and one-push commands, and gimbal parameter writes.
+  - **Not yet approved (new, 2026-11-04):** stream bitrate writes (`setPayloadStreamBitrate`); persistence is unknown.
   - Never write a camera setting value that was not read back through a decoder already checked
     against the camera (`--steps settings-read`).
 - Commit and push to GitHub when a stage or fix is finished.
@@ -123,5 +149,10 @@ results, acceptance checklist, limitations). For setup on native Ubuntu, see
   loss.
 - **Video:** `rtsp://<IP>:8554/payload`, H.264 1280×720 at about 30 fps. Under WSL2 NAT only TCP
   works.
+- **KLV is unverified on hardware from this app.** The only topology evidence is one capture from ViO beta firmware (2026-10-29): video and
+  KLV in one TS on `239.255.0.1:8554`, with tags 1, 2, 16–21 and 65 only. Those are not universal settings.
+- **`avdec_h264` grows by about 20 MB/h** with no app code (`docs/TESTING.md`). A flat line needs proof that frames flowed: `openh264dec` stayed flat
+  and did decode, but it exited at once on an x264 stream.
+- **KLV and video are not synchronised.** The panel shows the latest stream metadata. Never present it as describing a frame.
 - **Build:** a full parallel build can exhaust memory. Use `JOBS=2 scripts/build.sh` if the machine
   freezes or a compile is killed.

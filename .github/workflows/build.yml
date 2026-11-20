@@ -1,0 +1,137 @@
+name: build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build pkg-config qt6-base-dev qt6-webengine-dev libgl-dev libpcap-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libgstrtspserver-1.0-dev \
+            gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav
+      - name: Build
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          cmake --build build -- -k 0
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+      - name: AppImage
+        run: scripts/package-linux.sh build dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-appimage
+          path: dist/*.AppImage
+          if-no-files-found: error
+
+  windows:
+    runs-on: windows-2022
+    env:
+      GST_VERSION: 1.26.10
+      NPCAP_SDK_VERSION: "1.13"
+    steps:
+      - name: Keep LF line endings (the SDK patches must apply)
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ilammy/msvc-dev-cmd@v1
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: 6.8.3
+          arch: win64_msvc2022_64
+          modules: qtwebengine qtwebchannel qtpositioning
+          cache: true
+      - uses: actions/cache@v4
+        with:
+          path: downloads
+          key: win-downloads-gst${{ env.GST_VERSION }}-npcap${{ env.NPCAP_SDK_VERSION }}
+      - name: GStreamer and Npcap SDK
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force downloads | Out-Null
+          function Get-File($url, $out) {  # the GStreamer server cuts large downloads; resume until complete
+            for ($i = 0; $i -lt 20; $i++) {
+              curl.exe -fsSL -C - -o $out $url
+              if ($LASTEXITCODE -eq 0) { return }
+            }
+            throw "download failed: $url"
+          }
+          $base = "https://gstreamer.freedesktop.org/data/pkg/windows/$env:GST_VERSION/msvc"
+          foreach ($m in "gstreamer-1.0-msvc-x86_64-$env:GST_VERSION.msi", "gstreamer-1.0-devel-msvc-x86_64-$env:GST_VERSION.msi") {
+            Get-File "$base/$m" "downloads\$m"
+            Start-Process msiexec -Wait -ArgumentList "/i downloads\$m /qn ADDLOCAL=ALL INSTALLDIR=C:\gstreamer\"
+          }
+          $pc = Get-ChildItem C:\gstreamer -Recurse -Filter gstreamer-1.0.pc | Select-Object -First 1
+          if (-not $pc) { throw "GStreamer install not found" }
+          $root = $pc.Directory.Parent.Parent.FullName
+          "GST_ROOT=$root" >> $env:GITHUB_ENV
+          "PKG_CONFIG_PATH=$($pc.DirectoryName)" >> $env:GITHUB_ENV
+          "$root\bin" >> $env:GITHUB_PATH
+          Get-File "https://npcap.com/dist/npcap-sdk-$env:NPCAP_SDK_VERSION.zip" downloads\npcap-sdk.zip
+          Expand-Archive downloads\npcap-sdk.zip -DestinationPath C:\npcap-sdk
+          "NPCAP_SDK=C:\npcap-sdk" >> $env:GITHUB_ENV
+      - name: pkg-config
+        shell: pwsh
+        run: |
+          # Strawberry Perl's pkg-config is first on the runner's PATH; use a real one
+          $pkg = "$env:GST_ROOT\bin\pkg-config.exe"
+          if (-not (Test-Path $pkg)) { choco install -y --no-progress pkgconfiglite; $pkg = "C:\ProgramData\chocolatey\bin\pkg-config.exe" }
+          "PKG_CONFIG_EXE=$pkg" >> $env:GITHUB_ENV
+          & $pkg --modversion gstreamer-1.0
+      - name: Build
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DPKG_CONFIG_EXECUTABLE="%PKG_CONFIG_EXE%"
+          cmake --build build -- -k 0
+        shell: cmd
+      - name: GStreamer registry and elements
+        shell: pwsh
+        run: |
+          # The first gst_init on a fresh machine scans every plugin (slow on Windows); do it outside the test timeouts
+          $missing = "appsink appsrc avdec_h264 fakesink h264parse mpegtsmux openh264enc rtph264pay rtpmp2tdepay rtpmp2tpay rtspsrc tsdemux udpsink udpsrc videoconvert videotestsrc".Split(" ") |
+            Where-Object { gst-inspect-1.0 $_ *> $null; $LASTEXITCODE -ne 0 }
+          if ($missing) { Write-Output "Missing GStreamer elements: $missing" }
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+      - name: Portable zip
+        shell: pwsh
+        run: scripts\package-windows.ps1 -Build build -Out dist
+      - name: Smoke test the portable folder
+        shell: pwsh
+        run: |
+          # Run from the zip's contents with no Qt or GStreamer on PATH, as on a customer-site laptop
+          $dir = Get-ChildItem dist -Directory | Select-Object -First 1
+          $env:PATH = "C:\Windows\system32;C:\Windows"
+          $env:QT_QPA_PLATFORM = "offscreen"
+          $p = Start-Process "$($dir.FullName)\mavlink_debug_app.exe" -PassThru -RedirectStandardError smoke.err
+          Start-Sleep 15
+          if ($p.HasExited) { Get-Content smoke.err; throw "the app exited with code $($p.ExitCode)" }
+          $p.Kill()
+          & "$($dir.FullName)\mavlink_capture.exe" --ip 127.0.0.1 --seconds 2 --out smoke  # nothing answers: it must still run and exit
+          if ($LASTEXITCODE) { throw "mavlink_capture exited with $LASTEXITCODE" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-portable
+          path: dist/*.zip
+          if-no-files-found: error
+      - name: Video test logs (on failure)
+        if: failure()
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
+          GST_DEBUG: "2"
+        run: |
+          foreach ($t in "test_video", "test_klv_stream") {
+            $p = Start-Process "build\$t.exe" -ArgumentList "-o $t.txt,txt" -RedirectStandardError "$t.err" -PassThru -NoNewWindow
+            if (-not $p.WaitForExit(90000)) { $p.Kill(); "== $t KILLED after 90 s" }
+            "== $t log"; Get-Content "$t.txt" -ErrorAction SilentlyContinue
+            "== $t stderr (last 60 lines)"; Get-Content "$t.err" -Tail 60 -ErrorAction SilentlyContinue
+          }

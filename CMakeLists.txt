@@ -4,56 +4,102 @@ project(MavlinkDebugApp LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
-find_package(Qt6 REQUIRED COMPONENTS Widgets Test)
+find_package(Qt6 REQUIRED COMPONENTS Widgets Network Test)
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE RelWithDebInfo)
 endif()
 
-# --- Gremsy PayloadSDK (git submodule, pinned) + this app's transport-observer patch ---
+# --- Gremsy PayloadSDK (git submodule, pinned) + this app's patches, applied in order ---
 set(SDK_DIR ${CMAKE_SOURCE_DIR}/third_party/PayloadSdk)
-set(SDK_PATCH ${CMAKE_SOURCE_DIR}/patches/payloadsdk-transport-observer.patch)
+set(SDK_PATCHES ${CMAKE_SOURCE_DIR}/patches/payloadsdk-transport-observer.patch
+                ${CMAKE_SOURCE_DIR}/patches/payloadsdk-windows.patch)
 if(NOT EXISTS ${SDK_DIR}/libs/CMakeLists.txt)
     message(FATAL_ERROR "PayloadSDK missing: run  git submodule update --init")
 endif()
-execute_process(COMMAND git apply --reverse --check ${SDK_PATCH}
+list(GET SDK_PATCHES -1 sdk_last_patch)
+execute_process(COMMAND git apply --reverse --check ${sdk_last_patch}
                 WORKING_DIRECTORY ${SDK_DIR} RESULT_VARIABLE sdk_unpatched OUTPUT_QUIET ERROR_QUIET)
-if(NOT sdk_unpatched EQUAL 0)
-    execute_process(COMMAND git apply ${SDK_PATCH} WORKING_DIRECTORY ${SDK_DIR} RESULT_VARIABLE rc)
-    if(NOT rc EQUAL 0)
-        message(FATAL_ERROR "Could not apply ${SDK_PATCH} to ${SDK_DIR}")
-    endif()
-    message(STATUS "Applied ${SDK_PATCH}")
+if(NOT sdk_unpatched EQUAL 0)  # the last patch is not in yet: apply each one that is missing
+    foreach(p ${SDK_PATCHES})
+        execute_process(COMMAND git apply --reverse --check ${p}
+                        WORKING_DIRECTORY ${SDK_DIR} RESULT_VARIABLE missing OUTPUT_QUIET ERROR_QUIET)
+        if(NOT missing EQUAL 0)
+            execute_process(COMMAND git apply ${p} WORKING_DIRECTORY ${SDK_DIR} RESULT_VARIABLE rc)
+            if(NOT rc EQUAL 0)
+                message(FATAL_ERROR "Could not apply ${p} to ${SDK_DIR}")
+            endif()
+            message(STATUS "Applied ${p}")
+        endif()
+    endforeach()
+endif()
+
+if(MSVC)
+    set(APP_WARNINGS /W3)
+else()
+    set(APP_WARNINGS -Wall -Wextra)
 endif()
 
 find_package(Threads REQUIRED)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GSTVIDEO REQUIRED IMPORTED_TARGET gstreamer-1.0 gstreamer-app-1.0 gstreamer-video-1.0)
-pkg_check_modules(PCAP REQUIRED IMPORTED_TARGET libpcap)
+if(WIN32)
+    # Npcap SDK (headers, import library). The user installs the Npcap runtime (its licence forbids
+    # bundling), so wpcap.dll is delay-loaded and PcapCapture checks that it loads before any pcap call.
+    set(NPCAP_SDK "$ENV{NPCAP_SDK}" CACHE PATH "Npcap SDK folder (Include/, Lib/x64/)")
+    if(NOT EXISTS ${NPCAP_SDK}/Include/pcap/pcap.h)
+        message(FATAL_ERROR "Npcap SDK not found: set NPCAP_SDK (https://npcap.com/#download)")
+    endif()
+    add_library(PkgConfig::PCAP INTERFACE IMPORTED)
+    target_include_directories(PkgConfig::PCAP INTERFACE ${NPCAP_SDK}/Include)
+    target_link_libraries(PkgConfig::PCAP INTERFACE ${NPCAP_SDK}/Lib/x64/wpcap.lib delayimp)
+    target_link_options(PkgConfig::PCAP INTERFACE /DELAYLOAD:wpcap.dll)
+    add_compile_definitions(NOMINMAX WIN32_LEAN_AND_MEAN _USE_MATH_DEFINES)
+else()
+    pkg_check_modules(PCAP REQUIRED IMPORTED_TARGET libpcap)
+endif()
 add_subdirectory(${SDK_DIR}/libs ${CMAKE_BINARY_DIR}/payloadsdk)  # target: PayloadSDK
 target_link_libraries(PayloadSDK Threads::Threads)  # plain signature: the SDK's own CMake uses it
 
 # --- Qt-free MAVLink core (framing, decoding) ---
 add_library(mavcore STATIC src/mavlink_frame.cpp)
 target_include_directories(mavcore PUBLIC src ${SDK_DIR}/libs/third-party/mavlink/include/mavlink/v2.0)
-target_compile_options(mavcore PRIVATE -Wall -Wextra)
+target_compile_options(mavcore PRIVATE ${APP_WARNINGS})
 
 # --- App logic without widgets: SDK ownership, link health, frame model ---
 add_library(appcore STATIC
     src/link_health.cpp src/payload_link.cpp src/frame_model.cpp src/frame_filter.cpp
     src/frame_text.cpp src/frame_writer.cpp src/flow_stats.cpp src/mavlink_dict.cpp
-    src/command_tracker.cpp src/telemetry.cpp src/detection.cpp src/payload_profile_vio.cpp src/payload_profile_zio.cpp src/payload_profile_mb1.cpp src/payload_profile_orusl.cpp src/profiles.cpp src/pcap_capture.cpp)
+    src/command_tracker.cpp src/telemetry.cpp src/detection.cpp src/misb0601.cpp src/metadata_model.cpp src/payload_profile_vio.cpp src/payload_profile_zio.cpp src/payload_profile_mb1.cpp src/payload_profile_orusl.cpp src/profiles.cpp src/pcap_capture.cpp src/diagnostics.cpp src/gamepad.cpp)
 target_include_directories(appcore PUBLIC src ${SDK_DIR}/libs)  # libs: detection_packet.h, which has no other SDK dependency
 target_link_libraries(appcore PUBLIC Qt6::Gui mavcore PkgConfig::PCAP PRIVATE PayloadSDK)
-target_compile_options(appcore PRIVATE -Wall -Wextra)
+target_compile_options(appcore PRIVATE ${APP_WARNINGS})
+if(WIN32)
+    target_link_libraries(appcore PRIVATE xinput)  # gamepad: XInput ships with Windows
+endif()
 # XML definitions matching the generated headers; see MavlinkDict::defaultDir()
 target_compile_definitions(appcore PRIVATE
     MAVLINK_XML_DIR="${SDK_DIR}/libs/third-party/mavlink/include/mavlink/v2.0/message_definitions")
 
 # --- Widgets and the GUI application ---
-add_library(appgui STATIC src/theme.cpp src/main_window.cpp src/inspector_widget.cpp src/stats_widget.cpp src/payload_pages.cpp
-    src/video_player.cpp src/video_page.cpp src/splash.cpp)
-target_link_libraries(appgui PUBLIC Qt6::Widgets appcore PRIVATE PkgConfig::GSTVIDEO)
-target_compile_options(appgui PRIVATE -Wall -Wextra)
+add_library(appgui STATIC src/theme.cpp src/main_window.cpp src/inspector_widget.cpp src/stats_widget.cpp src/payload_pages.cpp src/gamepad_page.cpp
+    src/video_player.cpp src/video_page.cpp src/klv_receiver.cpp src/klv_page.cpp src/splash.cpp src/diagnostics_page.cpp src/web_settings_page.cpp)
+target_link_libraries(appgui PUBLIC Qt6::Widgets Qt6::Network appcore PRIVATE PkgConfig::GSTVIDEO)
+# Shown in diagnostic reports; the SDK commit is what the update check compares against upstream
+execute_process(COMMAND git rev-parse HEAD WORKING_DIRECTORY ${SDK_DIR} OUTPUT_VARIABLE SDK_COMMIT OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+execute_process(COMMAND git describe --always --dirty --exclude "*" WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+                OUTPUT_VARIABLE APP_GIT OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+target_compile_definitions(appgui PRIVATE SDK_COMMIT="${SDK_COMMIT}" APP_GIT="${APP_GIT}")
+find_package(Qt6 QUIET COMPONENTS WebEngineWidgets)  # optional: the Web settings tab falls back to the system browser
+if(Qt6WebEngineWidgets_FOUND)
+    target_link_libraries(appgui PRIVATE Qt6::WebEngineWidgets)
+    target_compile_definitions(appgui PRIVATE HAVE_WEBENGINE)
+else()
+    message(STATUS "Qt WebEngine not found: Web settings opens the system browser (apt install qt6-webengine-dev to embed it)")
+endif()
+if(WIN32)
+    target_link_libraries(appgui PRIVATE iphlpapi)  # if_nametoindex
+endif()
+target_compile_options(appgui PRIVATE ${APP_WARNINGS})
 
 add_executable(mavlink_debug_app src/main.cpp)
 target_link_libraries(mavlink_debug_app PRIVATE appgui)
@@ -77,7 +123,16 @@ if(GSTRTSPSERVER_FOUND)
     set_tests_properties(video PROPERTIES TIMEOUT 60 ENVIRONMENT QT_QPA_PLATFORM=offscreen)
 endif()
 
-foreach(t link_logic payload_link inspector payload_control pcap main_window detection)
+add_executable(test_klv_stream tests/test_klv_stream.cpp)
+target_link_libraries(test_klv_stream PRIVATE Qt6::Test appgui PkgConfig::GSTVIDEO)
+add_test(NAME klv_stream COMMAND test_klv_stream)
+set_tests_properties(klv_stream PROPERTIES TIMEOUT 300 ENVIRONMENT QT_QPA_PLATFORM=offscreen)
+
+set(APP_TESTS link_logic payload_link inspector payload_control pcap main_window detection misb0601 metadata_model diagnostics gamepad)
+if(WIN32)
+    list(REMOVE_ITEM APP_TESTS pcap)  # calls libpcap directly; CI runners cannot install Npcap (no silent free install)
+endif()
+foreach(t ${APP_TESTS})
     add_executable(test_${t} tests/test_${t}.cpp)
     target_link_libraries(test_${t} PRIVATE Qt6::Test appgui)
     add_test(NAME ${t} COMMAND test_${t})

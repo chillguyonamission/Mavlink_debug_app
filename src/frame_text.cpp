@@ -66,7 +66,7 @@ QString validationText(const CapturedFrame &c)
     if (f.signaturePresent)
         out << QStringLiteral("Signature present (13 bytes), NOT verified: no signing key is configured.");
     if (c.sendErrno)
-        out << QStringLiteral("TX: sendto() failed: %1. The frame did not leave this PC.").arg(QString::fromLocal8Bit(strerror(c.sendErrno)));
+        out << QStringLiteral("TX: sendto() failed: %1. The frame did not leave this PC.").arg(qt_error_string(c.sendErrno));
     return out.join(QLatin1Char('\n'));
 }
 

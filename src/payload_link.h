@@ -121,6 +121,8 @@ public:
     bool irFfcMode(bool automatic);  // also starts the FFC_MODE DEBUG stream: the only read-back, the SDK's getter is empty
     bool irFfcTrigger();
     bool eoWbOnePush();
+    // cam: 1 = EO, 2 = IR, the stream functions' numbering, not camera_type_t. The read-back is VIDEO_STREAM_INFORMATION in telemetry().
+    bool streamBitrate(int cam, quint32 bps);
 
     // The gimbal's own parameters (PARAM protocol), not its motion. The answer is PARAM_VALUE, in telemetry().
     bool gimbalSettingsRead();

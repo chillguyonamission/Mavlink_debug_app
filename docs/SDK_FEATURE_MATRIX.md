@@ -1,7 +1,7 @@
 # PayloadSDK feature matrix
 
 Part 1 covers payload models. Part 2 covers every public `PayloadSdkInterface` API in `fba3c70`. Only VIO has run on
-hardware.
+hardware. The SDK is now at `2021d9f`; its one new API, `setPayloadTriggerAdvanceFeatures()`, is not audited yet.
 
 ## Part 1: payload coverage
 
@@ -39,9 +39,9 @@ Other differences inside a target:
 | Payload model | Profile exists | SDK integration | MAVLink integration | Gimbal control | Camera features | Tracking | Video streaming | Status |
 |---|---|---|---|---|---|---|---|---|
 | VIO | Yes | Hardware-checked | Hardware-checked | Hardware-checked on 3.1.8.21: modes, rate, angle by rate | Zoom, focus, settings: hardware-checked. Photo, recording, FFC, white balance: mocks only | Hardware-checked on 3.1.4.18, not since 3.1.8.21. Detection: mocks only | Hardware-checked over TCP. UDP unresolved | **PARTIAL** |
-| ZIO | Yes | Mocks only | Mocks only | Same code as VIO, unchecked. No control source in the header | 25 settings from the header. No IR, record source, FFC | Offered. The SDK builds its detection-mode example for ZIO but not its box example | Same URL as ui_demo, unchecked. The SDK builds no ui_demo for ZIO | **NEEDS VERIFICATION** |
-| OrusL | Yes | Mocks only | Mocks only | Same code as VIO, unchecked. No control source in the header | 38 settings from the header. SpotAE not built | Offered, unchecked | Same URL as ui_demo, unchecked | **NEEDS VERIFICATION** |
-| MB1 (Lynx, GHadron) | Yes | Mocks only | Mocks only | Same code as VIO, unchecked. `GB_FW_FLAG` Overwrite / Forward | 60 settings from the header. No focus. FFC offered on thin evidence | Offered, unchecked. `DETECTION_EN` may also be needed | Same URL as ui_demo, unchecked | **NEEDS VERIFICATION** |
+| ZIO | Yes | Mocks only | Mocks only | Same code as VIO, unchecked. `GB_FW_FLAG` Autopilot / Onboard computer / SBUS Convert | 25 settings from the header. No IR, record source, FFC | Offered. The SDK builds its detection-mode example for ZIO but not its box example | Same URL as ui_demo, unchecked. The SDK builds no ui_demo for ZIO | **NEEDS VERIFICATION** |
+| OrusL | Yes | Mocks only | Mocks only | Same code as VIO, unchecked. `GB_FW_FLAG` Autopilot / Onboard computer / SBUS Convert | 38 settings from the header. SpotAE not built | Offered, unchecked | Same URL as ui_demo, unchecked | **NEEDS VERIFICATION** |
+| MB1 (Lynx, GHadron) | Yes | Mocks only | Mocks only | Same code as VIO, unchecked. `GB_FW_FLAG` Autopilot / Onboard computer / SBUS Convert (renamed from Overwrite / Forward in `2021d9f`) | 60 settings from the header. No focus. FFC offered on thin evidence | Offered, unchecked. `DETECTION_EN` may also be needed | Same URL as ui_demo, unchecked | **NEEDS VERIFICATION** |
 | Plain Orus | No | None | None | None | None | None | None | **NOT SUPPORTED** by this SDK |
 
 No model is **COMPLETE**, since that requires verification and even VIO has features only mocks have run. No model is
@@ -140,7 +140,8 @@ and streams**.
 
 | API | Status | HW | Notes |
 |---|---|---|---|
-| `setPayloadStreamBitrate`, `setPayloadStreamResolution`, `setPayloadStreamProfile` | Needs verification | | Values, persistence and RTSP recovery unverified |
+| `setPayloadStreamBitrate` | Implemented | no | Persistence and video recovery unverified. See `API_INTEGRATION.md` |
+| `setPayloadStreamResolution`, `setPayloadStreamProfile` | Needs verification | | Values, persistence and RTSP recovery unverified |
 | `getPayloadStreamBitrate` | Unsupported | | Requests stream information and always returns 0. The app shows the bitrate from the received `VIDEO_STREAM_INFORMATION` instead |
 
 ## Gimbal
@@ -172,7 +173,7 @@ Everything else the examples show is in the tables above.
 | `payload_download_media_files`, `payload_extract_tiff_file` | Fetch and unpack files from the payload | Not requested. Needs libcurl and JSON |
 | `tests/parse_klv_stream`, `tests/parse_thermal_stream` | Read KLV metadata and thermal data from the video | Not requested. Needs the SDK's MISB library and OpenCV |
 | `camera_time_lapse_photography` | Interval capture | Not requested. The app takes single shots |
-| `camera_ir_isotherm_profile` | Isotherm regions | On MB1, in the settings dialog. Its IDs are in no VIO or OrusL header, so not offered there |
+| `camera_ir_isotherm_profile` | Isotherm regions | On MB1, in the settings panel. Its IDs are in no VIO or OrusL header, so not offered there |
 | `gimbal_do_calib`, `gimbal_calib_auto_tune` | Gimbal calibration | Not requested, and disruptive |
 | `payload_get_video_record_status` | Record status callback | The app reads `CAMERA_CAPTURE_STATUS` instead. Its file URL is not shown |
-| `tests/gamepad_control` | Gamepad control | Not requested |
+| `tests/gamepad_control` | Gamepad control | Done: configurable, Xbox layout (docs/USER_GUIDE.md "Gamepad") |

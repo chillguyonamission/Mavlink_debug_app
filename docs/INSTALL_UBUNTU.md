@@ -37,6 +37,19 @@ sudo apt install -y build-essential cmake pkg-config \
   server.
 - `gstreamer1.0-libav` provides the H.264 decoder the VIO stream needs.
 
+What each video source needs at run time. In RTP/TS mode the app names any missing element when you press Start:
+
+| Element | Package | Used by |
+|---|---|---|
+| `rtspsrc`, `udpsrc`, `rtpmp2tdepay` | `gstreamer1.0-plugins-good` | `rtspsrc`: RTSP. The others: RTP/TS |
+| `tsdemux`, `h264parse` | `gstreamer1.0-plugins-bad` | RTP/TS (and `h264parse` for RTSP) |
+| `avdec_h264` | `gstreamer1.0-libav` | RTP/TS always; RTSP unless `decodebin` finds another decoder |
+| `videoconvert`, `appsink`, `decodebin` | `gstreamer1.0-plugins-base` (comes with the others) | Both |
+
+The KLV test also uses `openh264enc` and `mpegtsmux` from `gstreamer1.0-plugins-bad`, and `rtpmp2tpay` from
+`gstreamer1.0-plugins-good`. Tested with Qt 6.4.2 and GStreamer 1.24.2 on Ubuntu 24.04. RTP/TS needs no package beyond this list,
+and no Qt module was added.
+
 ## 3. Clone, build, and run the tests
 
 ```bash
@@ -112,50 +125,22 @@ You only see traffic that reaches this laptop. For other devices' unicast traffi
 with port mirroring or a hub, or record with `tcpdump -w file.pcap` on one of the devices and use
 **Open .pcap…**.
 
-## 7. Hardware checks still open
+## 7. Hardware checks
 
-These have not been run on a VIO yet. Each one writes files you can send back for analysis
-(attach them, or put them in a folder and share the path).
-
-### a. Passive capture (sends nothing that moves the payload)
+The open checks, and which of them change the payload's state, are listed in
+[DEVELOPMENT_PROGRESS.md](DEVELOPMENT_PROGRESS.md#open-hardware-checks). Two are safe at any time:
 
 ```bash
+# Passive capture: sends only what the app sends on connect
 build/mavlink_capture --ip 192.168.55.1 --seconds 30 --out ~/vio_native
-```
 
-Keep the printed report and `~/vio_native.tlog` / `.jsonl`. This confirms the native network path
-and compares it with the WSL results in the README.
-
-### b. Read-only GUI screenshots, including video
-
-```bash
+# Read-only GUI screenshots, including video
 mkdir -p ~/shots
-HW_IP=192.168.55.1 SCREENSHOT_DIR=$HOME/shots QT_QPA_PLATFORM=offscreen \
-    build/test_main_window hardwareScreenshots
+HW_IP=192.168.55.1 SCREENSHOT_DIR=$HOME/shots QT_QPA_PLATFORM=offscreen build/test_main_window hardwareScreenshots
 ```
 
-### c. Control path (moves the gimbal)
-
-**Before running:** the gimbal must be free to move, nothing within its reach, and you next to it,
-able to unplug it. Each motion is small and undone afterwards. No photo or recording is taken.
-
-```bash
-build/hw_vio_commands --ip 192.168.55.1 --steps camera,angle,rate,mode-param --record ~/vio_cmds.jsonl
-```
-
-### d. Not yet run on any VIO (decide before running)
-
-These need an explicit decision, because they change the payload's state or storage:
-
-- **Gimbal modes OFF / RESET / MAPPING:** use the gimbal column (Operate view). OFF asks for confirmation; the camera
-  is not stabilised while it is off.
-- **Photo capture and video recording:** use the camera column (Operate view). Files are written to
-  the SD card.
-- **Object tracking:** **Arm** in the camera column, then click a target in the video. Arming changes
-  the `TRACK_MODE` parameter, and a tracked target moves the gimbal. Check that the box drawn on the
-  video matches the target: this confirms the 1920×1080 tracker coordinates.
-- **Rate control retest:** with `RC_MODE` = Standard. This is a persistent payload setting; note
-  the current value first so it can be restored.
+Compare the capture with [HARDWARE_RESULTS.md](HARDWARE_RESULTS.md). `build/hw_vio_commands` moves the gimbal: stand next
+to it, with nothing in its reach, and run only the steps you have agreed to.
 
 ## Troubleshooting
 

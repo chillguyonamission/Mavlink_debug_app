@@ -181,19 +181,23 @@ void PayloadLink::poll()
     if (commands) emit commandsChanged();
     updateDetection(detPackets);
 
-    // Once per connection, as Gremsy's ui_demo does: ask for info and start the parameter streams. The SDK addresses
-    // the camera at compid 101 until its own message thread has handled a camera frame, which comes after this
-    // observer saw it: wait 300 ms past the first camera frame (at most 5 s when no camera answers).
+    // Once per connection, as Gremsy's ui_demo does, and again after the link was stale: ask for info and start the
+    // parameter streams. The SDK addresses the camera at compid 101 until its own message thread has handled a camera
+    // frame, which comes after this observer saw it: wait 300 ms past the first camera frame (at most 5 s when no
+    // camera answers). The payload core's heartbeat must be fresh, since it serves the streams.
     const qint64 nowMsec = monoNs() / 1000000;
     const bool cameraKnown = (m_cameraSeenMs >= 0 && nowMsec - m_cameraSeenMs >= 300) ||
                              (m_openSinceMs >= 0 && nowMsec - m_openSinceMs > 5000);
-    if (!m_autoInfoSent && isOpen(m_state) && cameraKnown && m_telemetry.latest(MAVLINK_MSG_ID_HEARTBEAT, TelemetryStore::kPayloadCore)) {
+    const CapturedFrame *core = m_telemetry.latest(MAVLINK_MSG_ID_HEARTBEAT, TelemetryStore::kPayloadCore);
+    if (!m_autoInfoSent && isOpen(m_state) && cameraKnown && core && nowMsec - core->monoNs / 1000000 < m_timeoutMs) {
         m_autoInfoSent = true;
         requestPayloadInfo(true);
     }
 
     if (isOpen(m_state)) {
         const LinkState s = evaluateLink(m_obs, monoNs() / 1000000, m_timeoutMs);
+        // A rebooted payload forgets the streams it was asked for (seen on a VIO, 2026-11-13): ask again on return.
+        if (s == LinkState::Stale) m_autoInfoSent = false;
         if (s != m_state) setState(s);
     }
 }
@@ -287,9 +291,9 @@ bool PayloadLink::gimbalAngle(double pitch, double yaw, double maxDps)
     if (m_steer) endSteer(false, QStringLiteral("Replaced by a new angle"));
     GimbalAttitude a;
     gimbalAttitude(m_telemetry.latest(MAVLINK_MSG_ID_GIMBAL_DEVICE_ATTITUDE_STATUS)->frame, &a);  // setMotionFlags() checked it
-    const double far = std::max(std::abs(pitch - a.pitchDeg), std::abs(angleDiff(yaw, a.yawDeg)));
+    const double distance = std::max(std::abs(pitch - a.pitchDeg), std::abs(angleDiff(yaw, a.yawDeg)));
     // Time at full speed, plus the exponential approach (gain 1/s) and the stream's pauses; then it stops
-    m_steer = Steer{pitch, yaw, maxDps, nowMs() + 8000 + qint64(std::min(30000.0, 2000 * far / maxDps))};
+    m_steer = Steer{pitch, yaw, maxDps, nowMs() + 8000 + qint64(std::min(30000.0, 2000 * distance / maxDps))};
     m_tracker.expect(QStringLiteral("Move to angle pitch %1° yaw %2° (steered by rate, ≤ %3°/s)").arg(pitch).arg(yaw).arg(maxDps),
                      MAVLINK_MSG_ID_GIMBAL_DEVICE_SET_ATTITUDE, 0, {}, nowMs(), [](const MavFrame &f) {
                          float q[4];
@@ -523,6 +527,15 @@ bool PayloadLink::eoWbOnePush()
     if (!ready()) return false;
     expectUser4(QStringLiteral("EO white balance: one push"), 2, 8, 0);
     m_sdk->setPayloadCameraWBOnePushTrigg();
+    emit commandsChanged();
+    return true;
+}
+
+bool PayloadLink::streamBitrate(int cam, quint32 bps)
+{
+    if (!ready()) return false;
+    expectUser4(QStringLiteral("%1 stream bitrate: %2 Mbit/s").arg(cam == 2 ? QStringLiteral("IR") : QStringLiteral("EO")).arg(bps / 1e6), 4, 2, cam);
+    m_sdk->setPayloadStreamBitrate(cam, bps);
     emit commandsChanged();
     return true;
 }

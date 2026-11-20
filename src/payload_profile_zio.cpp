@@ -132,7 +132,11 @@ const PayloadProfile &zioProfile()
               {PAYLOAD_CAMERA_VIDEO_OSD_MODE_DEBUG, "Debug"},
               {PAYLOAD_CAMERA_VIDEO_OSD_MODE_STATUS, "Status"}}},
         },
-        nullptr, {}, 0,  // zio_sdk.h names no gimbal control source
+        PAYLOAD_CAMERA_GIMBAL_FW_FLAG,
+        {{PAYLOAD_CAMERA_GIMBAL_FW_FLAG_AUTOPILOT, "Autopilot"},
+         {PAYLOAD_CAMERA_GIMBAL_FW_FLAG_ONBOARD_COMPUTER, "Onboard computer"},
+         {PAYLOAD_CAMERA_GIMBAL_FW_FLAG_SBUS_CONVERT, "SBUS Convert"}},
+        PAYLOAD_CAMERA_GIMBAL_FW_FLAG_ONBOARD_COMPUTER,
     };
     return p;
 }

@@ -1,570 +1,88 @@
 # Gremsy MAVLink Debug App
 
-Desktop tool (C++17, Qt 6 Widgets, CMake) for controlling Gremsy payloads through the official
-PayloadSDK and inspecting the real MAVLink traffic of that connection.
+A desktop station for Gremsy payloads (C++17, Qt 6, CMake). It controls the gimbal and camera through Gremsy's official
+PayloadSDK, plays the payload's video, and shows every MAVLink frame on that link, so you can see exactly what was sent
+and what came back. It runs on Linux and Windows and also works as a diagnostic tool for a faulty payload.
 
-**Status: first release (Stages 1–6).** The release includes:
+![Operate view](docs/screenshots/operate.png)
 
-- connection management with saved profiles
-- the MAVLink Inspector, with network capture
-- gimbal and camera controls for each supported payload model
-- telemetry
-- command/acknowledgement tracking
-- live RTSP video
-- onboard object detection boxes on the video (not yet run on hardware)
+## What it does
 
-It was checked against a real VIO (see *Hardware checks*). The other models are built from the SDK's
-headers and have not been run on hardware. See *Acceptance checklist* and *Known limitations*.
+| Area | Features |
+|---|---|
+| **Operate** | Gimbal: modes, control source, hold-to-move pad with a speed slider, move to angle, measured attitude. Camera: photo, recording, view and record source, IR palette, zoom and focus, object tracking (click the video), object detection, IR FFC and white balance, all camera settings in a panel under the video. Video: RTSP, or RTP/TS with KLV metadata, with a live overlay. |
+| **Analyze** | Command log with ACK states and latency, telemetry and the payload's parameter streams, gimbal settings, traffic statistics, KLV, gamepad configuration. |
+| **Diagnose** | Health check of the link and every payload part, a read-only network check, SDK update check, an exportable report, and the payload's own web settings. |
+| **MAVLink monitor** | Every TX/RX frame from the SDK's own socket, CRC-checked and decoded, with filters, hex view, and `.tlog` / `.csv` / `.jsonl` export. Optional network capture shows other devices' traffic (for example payload ↔ autopilot). |
+| **Gamepad** | An Xbox controller drives the gimbal and camera. Every button and axis can be reassigned, following Gremsy's gamepad configuration page. |
 
-**Contents:** [Quick start](#quick-start-ubuntu-2404-or-wsl2) · [Supported payloads](#supported-payloads) ·
-[Build, test, install](#build-test-install) · [Run](#run) · [MAVLink Inspector](#mavlink-inspector) ·
-[Payload control](#payload-control) · [Hardware checks](#hardware-checks) · [Live video](#live-video) ·
-[Known limitations](#known-limitations)
+The user guide explains each screen: [docs/USER_GUIDE.md](docs/USER_GUIDE.md).
 
-## Supported payloads
+## Status
 
-PayloadSDK ships one parameter header per model (`libs/payload-define/<model>_sdk.h`). Every model it
-defines has a profile here: VIO, ZIO, MB1 and OrusL. Lynx and GHadron use the MB1 profile, since the SDK builds them
-with `-DMB1`. "Orus" means the OrusL profile; the SDK has no other Orus header. The full inventory and coverage matrix
-are in `docs/SDK_FEATURE_MATRIX.md`. Choose the model with **Model** in the SETTINGS drawer. The choice is saved with each
-connection profile, and changing it rebuilds the gimbal and camera panels. A header warning appears when
-the payload reports a different model name.
+**Branch `diagnostic-tool`, 2026-11-20.** 15/15 hardware-free tests pass on Linux and Windows CI.
 
-The connection is the same for every model: MAVLink over UDP to the payload's IP and port (default
-`192.168.55.1:14566`), with video at `rtsp://<IP>:8554/payload`. The controls that use only standard
-MAVLink are common to all models: gimbal modes, rate and move to angle, zoom and focus, photo and
-recording. What changes per model is listed below, using only that model's header:
+| | Run on a real payload | Tests only |
+|---|---|---|
+| **Control** | VIO: connection, gimbal modes and rate, move to angle, zoom, focus, view source, tracking, camera settings, gamepad (fixed Xbox layout) | Gimbal OFF / RESET / MAPPING, photo, recording, gamepad remapping |
+| **Video** | RTSP (H.264 720p, about 30 fps); RTP/TS with KLV received live once (VIO 3.1.9.24, UDP unicast) | KLV tag coverage beyond that one session |
+| **Newer features** | None yet | Object detection, stream and FOV telemetry, FFC, white balance, gimbal settings, bitrate, DIAGNOSE view |
+| **Models** | VIO (software 3.1.4.18, 3.1.8.21, 3.1.9.24) | ZIO, MB1 (Lynx, GHadron), OrusL: built from their SDK headers |
+| **Platforms** | Ubuntu 24.04 (native and WSL2) | Windows: builds and passes CI; not yet run on a Windows PC with a payload |
 
-| | VIO | ZIO | MB1 | OrusL |
-|---|---|---|---|---|
-| Hardware-tested | ✅ (software 3.1.4.18 and 3.1.8.21) | — | — | — |
-| View source | EO, IR, EO/IR, IR/EO, Sync, Side by side | EO only | EO, IR, EO/IR, IR/EO | EO, IR, EO/IR, IR/EO, Sync, Side by side |
-| Record source | ✅ | not supported | ✅ | ✅ |
-| IR palette | ✅ | not supported (EO only) | ✅ | ✅ |
-| Object tracking | ✅ (verified) | ✅ | ✅ | ✅ |
-| Focus | ✅ | ✅ | not supported | ✅ |
-| Gimbal control source | `GB_FW_FLAG` Autopilot / Onboard computer / SBUS Convert | none named | `GB_FW_FLAG` Overwrite / Forward | none named |
-| Camera settings dialog | 30: exposure, image, focus/zoom, thermal, video/OSD/LRF | 25: exposure, image, focus/zoom, video/OSD | 60: exposure, image, focus/zoom, thermal, isotherm regions, video/OSD/AI | 38: exposure, image, focus/zoom, thermal, video/OSD/LRF |
+What each check found is in [docs/HARDWARE_RESULTS.md](docs/HARDWARE_RESULTS.md). What is still open is in
+[docs/DEVELOPMENT_PROGRESS.md](docs/DEVELOPMENT_PROGRESS.md).
 
-A control the model does not support is shown disabled as "not supported by <model>". Tracking is replaced
-by a note, and the control-source switch is hidden. Settings whose header gives no values, or only signed
-values, are left out. Examples are OrusL gain, the MB1 `C_G_*` aliases, zoom/focus speed, LRF, AE
-compensation and isotherm temperatures. Each `src/payload_profile_<model>.cpp` lists them in a comment.
+## Progress
 
-## Quick start (Ubuntu 24.04 or WSL2)
+| Date | Milestone |
+|---|---|
+| 2026-10-22 | First release: connection and profiles, MAVLink inspector, network capture, VIO gimbal and camera control, telemetry, command tracking, RTSP video. Checked on a VIO. Station UI redesign. |
+| 2026-10-23 | Tracking fixed and verified; speed slider; camera settings dialog. VIO updated to 3.1.8.21: modes moved to the flag route, move to angle steered by rate. ZIO, MB1 and OrusL profiles. |
+| 2026-11-02 | Object detection with boxes on the video, stream and FOV telemetry, IR FFC, white balance, gimbal settings. Profiles audited against the SDK. |
+| 2026-11-03 | RTP/TS video with MISB ST 0601 KLV metadata. |
+| 2026-11-04 | Stream bitrate presets; camera settings moved under the video. |
+| 2026-11-13 | PayloadSDK updated to `2021d9f`. Windows port and CI. DIAGNOSE view. Portable Windows zip and Linux AppImage. |
+| 2026-11-20 | Gamepad control (Xbox Series X, verified on a VIO) and Gremsy's gamepad configuration page. |
 
-**Native Ubuntu (for example a dual-boot laptop):** follow [docs/INSTALL_UBUNTU.md](docs/INSTALL_UBUNTU.md).
-It covers GitHub access, dependencies, connecting the VIO over USB-C, video, live capture
-permissions, and the hardware checks that are still open.
+Every change is listed in [CHANGELOG.md](CHANGELOG.md).
+
+## Quick start
+
+**Ubuntu 24.04** (the full guide is [docs/INSTALL_UBUNTU.md](docs/INSTALL_UBUNTU.md)):
 
 ```bash
 git clone --recursive https://github.com/chillguyonamission/Mavlink_debug_app.git
 cd Mavlink_debug_app
-scripts/build.sh --run        # checks dependencies, builds, runs the tests, starts the app
+scripts/build.sh --run    # checks dependencies, builds, runs the tests, starts the app
 ```
 
-- **Missing dependencies:** `scripts/build.sh` prints the `apt install` line for anything missing.
-- **Parallel jobs:** it limits parallel compiles to about one per GB of free memory. On WSL2 with a
-  busy Windows host, use `JOBS=2 scripts/build.sh`: when Windows cannot back the VM's memory,
-  Hyper-V stops the whole VM mid-build.
+- `scripts/build.sh` prints the `apt install` line for anything missing.
+- On a machine short of memory, use `JOBS=2 scripts/build.sh`.
+- Install: `cmake --install build --prefix ~/.local`.
 
-## Layout
+**Windows:** download the portable zip from the latest CI run (Actions → build → Artifacts → `windows-portable`) and run
+`mavlink_debug_app.exe`. See [docs/INSTALL_WINDOWS.md](docs/INSTALL_WINDOWS.md). CI also builds a Linux AppImage.
 
-| Path | Contents |
+**Connect:** open **SETTINGS**, enter the payload address (default `192.168.55.1:14566`) and press **Connect**.
+Connecting sends no movement or camera command. Video is at `rtsp://<IP>:8554/payload`.
+
+## Documentation
+
+| Document | Read it for |
 |---|---|
-| `third_party/PayloadSdk` | Gremsy PayloadSDK, git submodule pinned to `payloadsdk_v3` @ `fba3c70` (GPL-3.0) |
-| `patches/payloadsdk-transport-observer.patch` | The only SDK modification; applied automatically by CMake |
-| `src/mavlink_frame.*` | Qt-free MAVLink framing, CRC validation, and field decoding |
-| `src/payload_link.*` | The single owner of the SDK connection; moves frames from the SDK's I/O threads to the GUI thread |
-| `src/link_health.*` | Pure logic: endpoint validation and link-state evaluation |
-| `src/frame_model.*`, `src/captured_frame.h` | Bounded table of captured frames, and traffic counters |
-| `src/mavlink_dict.*` | Units, enum names, bitmasks, and descriptions from the SDK's MAVLink XML |
-| `src/frame_text.*` | Summary, validation text, hex dump, and CSV/JSON encoding (one source for the table, the details pane, and the files) |
-| `src/frame_filter.*`, `src/flow_stats.*`, `src/frame_writer.*` | Inspector filters, per-flow statistics, and the background file writer |
-| `src/command_tracker.*` | Matches each UI action to its outgoing frame and to the payload's ACK |
-| `src/detection.*` | Object detection packets: validation, states, mapping onto the picture |
-| `src/telemetry.*` | Latest validated RX frames, the payload's DEBUG parameter stream, and gimbal flag rules |
-| `src/payload_profile*` | Per-model parameter IDs and values, taken from the SDK's `payload-define/<model>_sdk.h` |
-| `src/video_player.*`, `src/video_page.*` | RTSP video (GStreamer `appsink`) and the Video tab |
-| `src/profiles.*` | Saved connection profiles |
-| `src/pcap_capture.*` | Network capture (libpcap): live interface or `.pcap` file, shown as NET |
-| `src/main_window.*`, `src/inspector_widget.*`, `src/stats_widget.*`, `src/payload_pages.*` | GUI: header and status lamps, Operate and Analyze views, MAVLink monitor |
-| `src/theme.*` | Dark station theme: one palette and stylesheet for the whole app, and the status colours |
-| `tests/` | Hardware-free tests (CTest). `fake_payload.h` is a loopback UDP peer used in place of a payload. |
-| `tools/check_tlog.py` | Reads a `.tlog` file with pymavlink, an independent check of recorded files |
-| `tools/mavlink_capture.cpp` | Headless capture and report (`build/mavlink_capture`), for hardware checks |
-| `docs/INSTALL_UBUNTU.md` | Step-by-step install and hardware-test guide for native Ubuntu |
-| `docs/SDK_FEATURE_MATRIX.md` | Every PayloadSDK API: implemented, partial, unused, needs verification, or unsupported |
-| `docs/API_INTEGRATION.md` | Exact calls, parameters and response semantics for the newer features, and what is not built and why |
-| `docs/ARCHITECTURE.md`, `docs/TESTING.md`, `docs/DEVELOPMENT_PROGRESS.md`, `CHANGELOG.md` | Data paths and threads; tests and troubleshooting; software and hardware status; changes |
-| `docs/screenshots/` | GUI screenshots shown in this README (regenerated by the GUI test) |
-| `scripts/build.sh` | Dependency check, build, tests, optional run |
-| `tests/hw_vio_commands.cpp` | Hardware check of the control path on a real VIO; moves the gimbal; never run by ctest |
-
-## Dependencies (Ubuntu 24.04, native or WSL2)
-
-```bash
-sudo apt install build-essential cmake git pkg-config \
-    qt6-base-dev libgl-dev libpcap-dev \
-    libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
-    gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-libav
-# optional, enables the video test (local RTSP server):
-sudo apt install libgstrtspserver-1.0-dev
-```
-
-At runtime, video needs `rtspsrc` (plugins-good), `h264parse` (plugins-bad), and `avdec_h264`
-(libav).
-
-## Build, test, install
-
-```bash
-git submodule update --init                 # if not cloned with --recursive
-cmake -S . -B build
-cmake --build build -j4
-ctest --test-dir build --output-on-failure  # hardware-free; no payload needed
-cmake --install build --prefix ~/.local     # bin/mavlink_debug_app, bin/mavlink_capture, bin/message_definitions/
-```
-
-The installed binaries read the MAVLink XML from `message_definitions/` next to themselves (override
-with `MAVLINK_XML_DIR`). Build-tree binaries fall back to the SDK copy.
-
-## Run
-
-```bash
-./build/mavlink_debug_app      # under WSLg the window opens on the Windows desktop
-```
-
-Enter the payload IP and UDP port (default `192.168.55.1:14566`) in the **SETTINGS** drawer, then click
-**Connect**. Connecting never sends a movement or camera command. The drawer closes by itself once the payload's
-heartbeat arrives, and reopens if connecting fails.
-
-### Main screen
-
-One window, built so the gimbal can be steered while watching the video:
-
-- **Header:** status lamps, RX/TX frame rates, warnings, **SETTINGS**, and **Connect**.
-  - Lamps: **PAYLOAD** (payload core 26, camera 100 and gimbal 154 with a recent HEARTBEAT, e.g. `3/3`),
-    **MAVLINK** (the link state below), and **VIDEO** (player state and decoded fps).
-  - Lamp colours everywhere: green = confirmed by received data, amber = partial or waiting, red = lost or failed,
-    grey = off.
-  - Warnings appear only for conditions observed on the link: gimbal failure flags, capture-queue drops, send
-    errors, bad CRCs.
-- **SETTINGS drawer:** connection profile, IP, port and timeout, the detailed link status and counters, and
-  the RTSP URL, transport and latency.
-- **OPERATE view:** three resizable columns. The video gets the remaining width.
-  - Left, gimbal: modes, the hold-to-move pad and speed, move to angle, and the measured attitude.
-  - Centre: the video, with an overlay.
-  - Right: capture and recording, zoom and focus, tracking, camera settings, and camera status.
-  - Side columns scroll vertically when the window is short.
-- **ANALYZE view:** the command log (**Commands**), device info and the DEBUG parameter stream
-  (**Telemetry**), and traffic statistics (**Statistics**).
-- **MAVLINK MONITOR** (below both views):
-  - Always visible: direction (ALL/RX/TX/NET), message and text filters, Pause, Clear.
-  - **Details** shows the decoded fields and hex dump. **Tools** holds the sys/comp/status filters, export,
-    recording, and network capture.
-  - **▾** collapses the monitor to one line and gives its height to the video. Capture continues.
-- **Video overlay:** drawn only from validated RX frames received within the timeout. Stale values disappear
-  instead of freezing.
-  - REC with elapsed time, link problems, EO zoom, gimbal mode, and pitch/roll/yaw.
-  - Tracking state, and the target box when the tracker reports one.
-  - A centre reticle.
-- **Persistence:** window size, column widths, monitor height and collapsed state, and the last view are
-  restored on start-up.
-
-#### Screenshots
-
-These come from the offscreen GUI test against a simulated payload (`tests/fake_payload.h`), so the values are
-test data and the video is stopped. The overlay close-up uses a synthetic test picture. To regenerate them:
-`SCREENSHOT_DIR=$PWD/docs/screenshots QT_QPA_PLATFORM=offscreen build/test_main_window connectedWindowShowsLiveTraffic`.
-On a real payload, use the `hardwareScreenshots` run under *Hardware checks*.
-
-**Operate view:** gimbal | video | camera, with the MAVLink monitor below.
-
-![Operate view](docs/screenshots/operate.png)
-
-**Monitor collapsed** (its height goes to the video), and the **SETTINGS drawer** open:
-
-![Monitor collapsed](docs/screenshots/operate_monitor_collapsed.png)
-![Settings drawer](docs/screenshots/operate_settings.png)
-
-**Video overlay:** REC, zoom, gimbal mode, attitude, tracking state and target box, and the centre reticle.
-
-![Video overlay](docs/screenshots/video_overlay.png)
-
-**Analyze view:** Commands, Telemetry and Statistics.
-
-![Analyze: commands](docs/screenshots/analyze_commands.png)
-![Analyze: telemetry](docs/screenshots/analyze_telemetry.png)
-![Analyze: statistics](docs/screenshots/analyze_statistics.png)
-
-- **Profiles:** **Save…** stores the current IP, port, timeout and payload model under a name. Choosing
-  a profile fills those fields.
-- **Persistence:** profiles, the last values, inspector filters, and video settings are restored on
-  start-up. Each stored value is validated again before use, and invalid entries are dropped.
-
-### Connection status
-
-The status only reports what has actually been observed on the link:
-
-| Status | Meaning |
-|---|---|
-| Socket open, nothing received | The SDK is sending heartbeats; no reply yet. This does not prove the payload is reachable. |
-| Receiving data, no valid MAVLink | Datagrams are arriving, but none parsed as a valid frame. |
-| MAVLink traffic, no heartbeat | Valid frames are arriving, but no HEARTBEAT within the timeout. |
-| Heartbeat received | A HEARTBEAT arrived within the timeout. "Heartbeats from" lists every sysid/compid with its age. |
-| Stale | Traffic was seen earlier, but nothing within the timeout. The SDK keeps sending, so the link resumes when the payload returns. |
-
-## MAVLink Inspector
-
-The inspector shows every frame this app sends and receives on the SDK's link, from every system
-and component ID, in observation order.
-
-- **Table columns:** time, direction, peer endpoint, MAVLink version, sysid, compid, seq, message ID
-  and name, length, target system/component, status, and the decoded summary (hover a cell for the
-  full text).
-- **Statuses:**
-  - `OK` – CRC verified against the message's CRC_EXTRA.
-  - `BAD_CRC` – known message ID, but the checksum does not match.
-  - `UNKNOWN_ID` – message ID not in the ardupilotmega dialect, so the CRC cannot be verified.
-  - `TRUNCATED` – the datagram ended before the frame did.
-  - `GARBAGE` – bytes outside any frame.
-  - Extra markers: `signed (unverified)` and `SEND FAILED: <reason>`.
-- **Details pane:** validation result; decoded fields with type, units and enum or bitmask names
-  (values equal to a field's "invalid" marker, such as NaN, are flagged); the header, including
-  incompat/compat flags and the component name; and an annotated hex dump showing the header,
-  payload, CRC and signature byte ranges.
-- **Filters** (saved between runs):
-  - direction
-  - system and component ID
-  - message (a number matches the ID exactly; text matches part of the name)
-  - free text in the decoded values
-  - status (valid only / problems / unknown ID)
-- **Pause display** freezes the table only. Capture, statistics and recording continue; held frames
-  are appended on resume.
-- **Statistics tab:**
-  - count, rate, bytes and last-seen time for each direction, sysid, compid and message
-  - RX sequence gaps per sender, reported as *possible* loss (see below)
-
-### Network capture (other devices' traffic)
-
-The capture bar in the inspector adds MAVLink that is **not** this app's own link, for example
-payload ↔ autopilot.
-
-- **Live** on an interface, with a BPF filter. **Open .pcap…** loads a file, for example from
-  `tcpdump -w drone.pcap` on a companion computer.
-- **Display:** frames are tagged **NET**, with `source → destination` endpoints and the packet
-  timestamps. They use the same table, details, filters, statistics, and export as the app's own
-  link.
-- **Isolation:** NET frames never feed the link status, telemetry, or command tracking. RX sequence
-  statistics ignore them.
-- **Supported packets:** IPv4/UDP over Ethernet (including VLAN), Linux "any" (SLL/SLL2), and raw
-  IP. Fragments and non-UDP packets are counted as skipped.
-- **Default filter:** `udp or (vlan and udp)`. Plain `udp` silently misses VLAN-tagged packets.
-- **Permissions:** live capture needs root or the capability on the binary:
-  `sudo setcap cap_net_raw,cap_net_admin=eip build/mavlink_debug_app`. Reading a file needs neither.
-- **Visibility:** you only see traffic that reaches this interface. Other devices' unicast needs a
-  hub, switch port mirroring, or capturing on one of the endpoints. Under WSL2 NAT the WSL
-  interface sees only WSL's own traffic, so use native Linux for live capture.
-- **Duplicates:** capturing on the interface used by the app's own link shows that traffic twice,
-  once as RX/TX and once as NET. Filter by direction to separate them.
-
-### Export and recording
-
-- **Export visible…** writes the rows that pass the current filter. **Record…** writes every
-  captured frame, unfiltered, until stopped.
-- Both run on a background thread. If the disk cannot keep up, frames are dropped and the count is
-  shown; write errors stop the recording with a message.
-
-| Format | Contents |
-|---|---|
-| `.tlog` | Standard MAVLink telemetry log: an 8-byte big-endian UTC µs timestamp, then the raw frame. Opens in pymavlink, MAVExplorer, and Mission Planner. Contains only frames with a complete header and records no direction. Verified with `tools/check_tlog.py`. |
-| `.csv` | One row per frame: index, datagram, UTC time, monotonic ns, direction, peer, header fields, target, status, signed flag, send errno, decoded summary, raw hex. |
-| `.jsonl` | One JSON object per frame, with the same metadata plus typed `fields` (NaN and Inf are written as the strings `"nan"`, `"inf"`, `"-inf"`). |
-
-## Payload control
-
-The controls below are described as verified on a VIO. On other models, the panels offer only what that
-model's profile supports (see *Supported payloads*). Every command goes through the PayloadSDK API. Displayed "measured" values come only from received
-frames that passed CRC validation, never from what was sent.
-
-| Where | Controls | Feedback |
-|---|---|---|
-| Operate, left column | Modes OFF (with confirmation), LOCK, FOLLOW, MAPPING, RESET via the `GIMBAL_DEVICE_SET_ATTITUDE` flags; the payload's gimbal control source; move to angle (pitch ±90°, roll/yaw ±180°, the limits `setGimbalSpeed()` enforces); hold-to-move rate buttons | Measured attitude, rates, flags, failure flags and the `GB_MODE` parameter, next to the last commanded angle and the difference |
-| Operate, right column | Photo/video mode, capture, start/stop recording; view source, record source and IR palette (values from the selected model's `<model>_sdk.h`); hold-to-zoom and hold-to-focus, zoom to a percentage, auto focus; object tracking (below) | `CAMERA_CAPTURE_STATUS`, `STORAGE_INFORMATION`, `CAMERA_SETTINGS`, and the values the payload reports in its DEBUG stream |
-| Operate, right column | Object detection on and off; click a box to select it (nothing is sent); **Detection data…** opens a window with each packet's data | Seven states, boxes on the video, selected box's centre and size; in the window a live box table, summary, Pause and a 1000-packet log |
-| Operate, right column | IR FFC auto, manual and trigger; EO one-push white balance, on models that support them | ACK in Analyze › Commands; `FFC_MODE` under *Payload reports* |
-| Analyze › Telemetry | Request payload info and parameter streams; stream and FOV | Component and camera identity, app version, rangefinder, stream and FOV while fresh, and every DEBUG parameter with its age |
-| Analyze › Gimbal settings | Read the gimbal's parameters; write one after a confirmation | `PARAM_VALUE` per parameter, with its age and *N of M received* |
-| Analyze › Commands | — | Every action: outgoing frame, target, state, ACK result, queue and ACK latency. Double-click a frame number to open it in the inspector. |
-
-Notes:
-
-- **Gimbal modes:** set with the mode bits in `GIMBAL_DEVICE_SET_ATTITUDE` flags (`PayloadLink::gimbalMode()`),
-  Gremsy's route since payload software v307.54 (`examples/gimbal_set_mode.cpp`). The message has no ACK:
-  the button of the mode the gimbal reports is lit.
-  - VIO software 3.1.8.21 rejects the older `PARAM_EXT_SET GB_MODE` and no longer lists it in its camera
-    definition. Software 3.1.4.18 accepted only that older route, so it can no longer change modes from
-    this app; update the payload.
-  - **Control source:** the VIO passes this app's gimbal commands (modes, rates) to the gimbal only while
-    `GB_FW_FLAG` is *Onboard computer* (1); with *Autopilot* (0) it drops them. The gimbal panel shows the
-    value the payload reports and switches it. It is a stored payload setting, never changed by the app on
-    its own; a red hint appears whenever it is not Onboard computer.
-  - Bit `0x4000` of the reported flags is Gremsy's "mapping" bit; it is not defined in the MAVLink
-    XML.
-- **Hold-to-move rates and continuous zoom/focus:** rates are re-sent every 100 ms while a button is
-  held, like Gremsy's `ui_demo`, and a zero rate is sent on release. The **Speed** slider (1–90°/s) also
-  changes a held move. Zoom and focus send a
-  start command on press and a stop on release. Rate repeats stop if the link closes.
-- **Focus direction:** the buttons use MAVLink semantics (−1 = near, +1 = far). The SDK's
-  `Camera_Focus_Value` enum names these the other way round.
-- **Object tracking** (as in the SDK's `payload_do_object_tracking` example; verified on a VIO):
-  - **Select target** sends three commands:
-    1. `PARAM_EXT_SET TRACK_MODE` = object tracking (from `vio_sdk.h`).
-    2. Starts the `TRK_*` DEBUG streams at 100 ms.
-    3. `MAV_CMD_USER_4` (param1 4, param3 0) with mode ACTIVE.
-  - **Then:** clicking an object on the video, or **Track centre**, sends a gimbal rate of 0, ACTIVE again,
-    and the target position (param3 1, a 128×128 box). **Stop tracking** sends mode STOP.
-  - **Why the rate 0:** a VIO keeps holding the last `GIMBAL_DEVICE_SET_ATTITUDE` angle (for example after
-    **Move to angle**) and then tracks without moving the gimbal. A rate-0 command first, as Gremsy's
-    `demo_project` sends, hands the gimbal to the tracker.
-  - **Safety:** a target is never sent unless tracking is on. The SDK notes that a position sent to an
-    inactive tracker still moves the gimbal ("EagleEyes").
-  - **Status:** `TRK_STATUS` is decoded as `(mode << 8) | status` (IDLE / TRACKED / LOST). The target box comes
-    from `TRK_POS_X/Y/W/H`, where X/Y is the box's **top-left** corner.
-  - **Pixel space:** 1920×1080 for the target and the box, confirmed against the box the camera's own OSD
-    draws in the 1280×720 stream.
-- **Camera settings dialog** (**⚙ All camera settings…** in the camera column): exposure, image, focus and
-  zoom, thermal, video/OSD/rangefinder, 30 settings from `vio_sdk.h`. Opening it reads every setting
-  (`PARAM_EXT_REQUEST_LIST`); the controls show what the camera reports. A change is sent at once and read
-  back (`PARAM_EXT_REQUEST_READ`), because the VIO's `PARAM_EXT_ACK` carries no value. A number is only
-  sent with **Set** once the camera has reported it. Gain and bright use the IDs the camera lists
-  (`C_V_GAIN`, `C_V_BrP`): it rejects the header's `_HS` / `_LS` names.
-- **Boot splash:** about 2.6 s on start-up with the startup checks (dictionary, PayloadSDK version, profile,
-  target); a click or any key skips it.
-- **Settings drop-downs:** a value is sent only when you pick it; refreshing the page never sends
-  anything. The values the payload reports are shown separately on the status side.
-- **Controls when disconnected:** all controls are disabled while the link is not open. Nothing is
-  sent on application start-up.
-- **Automatic info request:** once per connection, when the payload core's heartbeat (compid 26)
-  first arrives, the app requests the info messages and starts the DEBUG parameter streams at
-  Gremsy's `ui_demo` rates. These are read requests only, listed on the Commands tab with an
-  `Auto:` prefix.
-
-### Command states
-
-| State | Meaning |
-|---|---|
-| Queued in SDK | The SDK API was called; the frame has not been seen on the wire yet. |
-| Not seen on wire | Nothing matching left within 3 s. |
-| Send failed | The frame was seen, but `sendto()` failed. |
-| Sent, awaiting ACK | Waiting for `COMMAND_ACK` (matched by MAV_CMD and answering component) or `PARAM_EXT_ACK` (matched by `param_id`). |
-| Accepted / In progress / Rejected | The ACK result (`MAV_RESULT` / `PARAM_ACK`). |
-| Sent (no ACK defined) | `GIMBAL_DEVICE_SET_ATTITUDE` has no acknowledgement; check the gimbal telemetry instead. |
-| No ACK (timeout) | Nothing within 3 s. This does **not** mean the command failed. |
-
-## Hardware checks
-
-`build/mavlink_capture --ip 192.168.55.1 --seconds 30 --out capture` connects through the same code
-as the GUI, records `capture.tlog` and `capture.jsonl`, and prints the components seen, the message
-rates, the RX sequence statistics, and the result of each request. It sends only what the GUI sends
-on connect, so nothing moves.
-
-Results from a VIO over USB-C (RNDIS, laptop at `192.168.55.100`, 2026-10-22):
-
-- **Device:** Gremsy JSC "Vio", software 3.1.4.18, hardware V42A.
-- **Network:** WSL2 NAT works for this link; mirrored networking was not needed. Over 20–30 s
-  captures there were 0 CRC errors, 0 junk bytes, and 0 capture drops.
-- **Components and rates:**
-  - Payload core 1/26: HEARTBEAT ~2 Hz; DEBUG parameters ~40 Hz once the streams are requested.
-  - Camera 1/100 (`MAV_COMP_ID_CAMERA`; the command list PDF says 101): HEARTBEAT,
-    STORAGE_INFORMATION, and CAMERA_CAPTURE_STATUS at ~1 Hz.
-  - Gimbal 1/154: GIMBAL_DEVICE_ATTITUDE_STATUS, MOUNT_ORIENTATION, and RAW_IMU at ~10 Hz;
-    HEARTBEAT and MOUNT_STATUS at 1 Hz.
-- **Acknowledgements:**
-  - `MAV_CMD_REQUEST_CAMERA_*` and `MAV_CMD_REQUEST_STORAGE_INFORMATION` are acknowledged in
-    3–250 ms; `MAV_CMD_SET_MESSAGE_INTERVAL` in 1–3 ms.
-  - `MAV_CMD_REQUEST_MESSAGE` is answered with the requested message within ~4 ms but never with a
-    COMMAND_ACK. The tracker reports this as "Answered (message, no ACK)".
-- **Sequence numbers:** the payload core and the camera sometimes send seq N+1 before N (two sender
-  threads share one counter). No frame is missing; the statistics count this as *reordered*.
-- **After the update to VIO software 3.1.8.21** (2026-10-23, `hw_vio_commands --ip 192.168.55.1 --steps
-  control-onboard,camera,rate,mode-flags`, all checks passed):
-  - With `GB_FW_FLAG` = Autopilot (the payload's value), `GIMBAL_DEVICE_SET_ATTITUDE` is ignored (modes, rates,
-    angles) and `MAV_CMD_DO_MOUNT_CONTROL` is denied. With Onboard computer, FOLLOW → LOCK → FOLLOW works through
-    the flags, and the `GB_MODE` DEBUG value follows (2 → 1 → 2).
-  - **Rate:** now in real units: 10°/s gave a 12.2°/s peak and 13° in about 1 s, so the × 18/π compensation used
-    for 3.1.4.18 was removed.
-  - **Mode kept while moving:** every rate/angle message carries mode flags, which 3.1.8.21 applies. The SDK
-    sent uninitialised flags (the arrows switched LOCK to FOLLOW). The app now sends the gimbal's mode
-    (patched SDK setter).
-  - **Angle:** no angle command works on 3.1.8.21: `q` in `GIMBAL_DEVICE_SET_ATTITUDE` is ignored (NaN or zero
-    rates, FOLLOW or LOCK), `MAV_CMD_DO_MOUNT_CONTROL` in angle mode is denied (in mode 0 it acts as a rate), and
-    the gimbal-manager commands are unsupported. **Move to angle is therefore steered by rate**
-    (`PayloadLink::gimbalAngle()`):
-    - The rate is proportional to the remaining pitch/yaw error (gain 1/s), capped at the Speed slider.
-    - It is computed from the measured attitude every 100 ms and stops within 0.5°.
-    - It stops if the attitude is older than 1.5 s or the move times out; any other gimbal command cancels it.
-    - Roll is not steered. The gimbal's attitude stream pauses for up to 0.8 s every second, which the low gain
-      tolerates.
-    - Measured on 2026-10-23: 10° pitch and 20° yaw moves each took about 2.5 s and ended 0.1–0.5° off.
-- **Commands on software 3.1.4.18** (`build/hw_vio_commands --ip 192.168.55.1 --steps camera,angle,rate,mode-param,tracking,settings`;
-  59 checks, all passed on 2026-10-23, before the update; `mode-param` has since been removed; small motions,
-  each undone; no photo or recording):
-  - **Camera:** `PARAM_EXT_SET C_SOURCE`, continuous zoom, and auto focus are all acknowledged by
-    1/100 within 1–4 ms. `EO_ZOOM` went 1 → 2.16 → 1.
-  - **Gimbal angle:** pitch −10° and back were reached in 100–300 ms. `GIMBAL_DEVICE_SET_ATTITUDE`
-    has no ACK, so telemetry is the confirmation.
-  - **Gimbal rate:** the VIO turns at the commanded rate × π/18 on yaw and pitch (10°/s → 1.7°/s,
-    30°/s → 5.2°/s, steady over 3 s), with `RC_MODE` already Standard. Sent × 18/π, 10°/s and 30°/s
-    gave 9.8–9.97°/s and 29.4°/s (2026-10-23, native Ubuntu).
-  - **Yaw angle:** an angle command lands about 2.7° off the requested yaw (pitch is exact); the checks
-    allow 4° on yaw.
-  - **Tracking** (2026-10-23): a centre pick is TRACKED within 0.1 s with the box at 896,476 (128×128). An
-    off-centre pick (480,270) after an angle command turned the gimbal 20.7° and brought the target
-    within 55 px of the centre in about 3.5 s. Without the rate-0 command the gimbal did not move.
-  - **Camera settings:** all 30 dialog settings were written with their current values and acknowledged;
-    `OSD_MODE`, `C_T_PALETTE` and `C_V_DEFOG` were changed, read back, and restored.
-  - **Modes:** `GB_MODE` = FOLLOW, then LOCK, was acknowledged in 1–2 ms. The flags changed
-    `0x3C` → `0x2C` → `0x3C` within ~100 ms, and the `GB_MODE` parameter followed. The flag route
-    (`YAW_LOCK` cleared in `GIMBAL_DEVICE_SET_ATTITUDE`) did not change the mode.
-  - **Not exercised:** OFF, RESET, MAPPING, photo, and recording.
-- **GUI:** `HW_IP=192.168.55.1 SCREENSHOT_DIR=/tmp/shots QT_QPA_PLATFORM=offscreen
-  build/test_main_window hardwareScreenshots` connects read-only. It saves screenshots of the Operate view
-  (monitor expanded, monitor collapsed, and settings drawer open) and of each Analyze tab.
-- **Rangefinder:** the VIO sends no `DISTANCE_SENSOR`; it streams the `LRF_RANGE` parameter (about
-  2–4 on a desk; the unit is not documented).
-- **Firmware quirks:**
-  - `CAMERA_INFORMATION.firmware_version` is `0x03010412` for software 3.1.4.18, which is the
-    reverse of the MAVLink byte order. The Telemetry tab shows both readings.
-  - The bytes after the terminating NUL in `vendor_name` and `model_name` contain leftover text
-    (for example `/dev/ttyTHS1`, `Baud=115200`). The app stops at the first NUL.
-
-## Live video
-
-The centre of the Operate view plays the payload's RTSP stream (**Start video** in its title bar; the URL,
-transport and latency are in the SETTINGS drawer):
-
-- **URL:** built from the payload IP using Gremsy's format, `rtsp://<IP>:8554/payload`, until you
-  edit it.
-- **Independent of MAVLink:** it has its own Start/Stop and does not need the MAVLink connection,
-  or affect it.
-- **Pipeline:** `rtspsrc ! decodebin ! videoconvert ! appsink`. The URL is set as an element
-  property, never parsed as pipeline syntax.
-- **Threading:** frames are copied on GStreamer's streaming thread; the GUI paints only the latest
-  one. Errors and end-of-stream are shown as text.
-- **Transport:**
-  - **TCP** (default): works through WSL2 NAT.
-  - **UDP**: RTP from the VIO does not get through WSL2 NAT ("no protocols left"). Use it on native
-    Linux.
-  - **UDP, then TCP**: tries UDP first.
-- **Measured on the VIO:** H.264, 1280×720, about 31 fps decoded over TCP while the MAVLink link
-  ran at about 90 frames/s, with no errors on either.
-
-## Threading
-
-- The SDK's I/O threads only copy each datagram into a bounded queue (20,000 entries). Overflow is
-  counted and shown as "capture queue drops"; it is never silent.
-- A 100 ms timer on the GUI thread drains the queue, parses the frames, and updates the link state
-  and the table (100,000 rows; the oldest are evicted).
-- Connect (the SDK blocks for about 1 s) and disconnect run on a worker thread.
-- Closing the window waits for that worker and joins the SDK threads.
-
-## Agreed design (Stage 1)
-
-- **Platform:** Ubuntu 24.04. Developed under WSL2 with WSLg. The SDK is POSIX-only, so there is
-  no native Windows build.
-- **First payload:** VIO. The SDK library is model-agnostic. The `VIO/ZIO/MB1/ORUSL` defines only
-  pick a header of parameter names and enum values, so models are selected at runtime from
-  capability tables built from those headers (now done: **Model** in the SETTINGS drawer).
-- **One connection owner:** the SDK's `UDP_Port` (client mode: target IP and port are set at runtime
-  via `T_ConnInfo`, and the local port is ephemeral). The app never opens a second command channel.
-- **Inspector source:** the patch adds `PayloadSdkInterface::regTransportObserver()`. It receives
-  every raw RX datagram (with the sender's endpoint) and every TX frame (with the `sendto` result),
-  before the SDK parses anything. Frames from every component on the link (gimbal, camera, payload
-  core, and others) are seen, including ones the SDK parser would silently drop.
-- **Capturing other devices' traffic** (for example payload ↔ autopilot) is planned as a later,
-  optional libpcap capture. It needs root or `CAP_NET_RAW`.
-- **First release:** connection management, MAVLink Inspector, gimbal, core camera,
-  telemetry/info pages, and live RTSP video (GStreamer `appsink` → Qt, with its own start/stop
-  lifecycle).
-
-## SDK patch (`patches/payloadsdk-transport-observer.patch`, +48/−10 lines)
-
-1. **Transport observer:** `transport_observer_t` on `Generic_Port`, called from `UDP_Port` read
-   and write.
-2. **Shutdown fix:** `UDP_Port::stop()` called `close()` while the read thread was blocked in
-   `recvfrom()`, so with a silent payload the thread join could hang. It now calls
-   `shutdown(SHUT_RD)` to wake the reader, and the socket is closed in the destructor.
-3. **`sdkQuit()`:** is idempotent and joins the SDK receive thread, which was never joined before.
-4. **`~PayloadSdkInterface()`:** frees the port and interface objects, which used to leak on every
-   reconnect.
-
-The patch is verified by `tests/test_sdk_transport.cpp`. It connects and disconnects twice against a
-loopback fake payload and checks that `sdkQuit()` returns in under 2 s (measured: 15 ms).
-
-## MAVLink parsing
-
-- Each UDP datagram is split independently into frames.
-- Statuses: `OK`, `BAD_CRC`, `UNKNOWN_ID` (CRC cannot be verified without the message's
-  CRC_EXTRA), `TRUNCATED`, and `GARBAGE` (bytes outside any frame).
-- MAVLink 1 and 2 are supported, including 24-bit message IDs, v2 trailing-zero payloads, and
-  extension fields.
-- CRC_EXTRA values and field tables come from the SDK's generated `ardupilotmega` dialect.
-- Signatures are **detected but not verified** (no key is configured).
-
-## SDK behaviour observed through the inspector
-
-- **Automatic stream requests:** on the first message from the payload core (compid 26,
-  `MAV_COMP_ID_USER2`), the SDK sends a burst of `COMMAND_LONG` stream-interval requests, one every
-  20 ms (`requestMessageStreamInterval()`). The user did not trigger these.
-- **Sequence numbers:** the app's TX frames (1/193) carry more than one independent sequence
-  counter. MAVLink keeps channel state per C++ translation unit, and the SDK encodes heartbeats and
-  commands in different files. TX sequence gaps therefore do not indicate packet loss.
-- **Send queue:** the SDK writes at most one queued message every 20 ms, so a command appears in TX
-  slightly after the API call.
-
-## Acceptance checklist
-
-| # | Criterion | Status | Evidence |
-|---|---|---|---|
-| 1 | Builds in the agreed environment | ✅ | Fresh clone with `scripts/build.sh` on Ubuntu 24.04 (WSL2): 0 warnings in app code |
-| 2 | IP and port editable without recompiling | ✅ | Connection bar and profiles; the SDK takes them at runtime (`T_ConnInfo`) |
-| 3 | Connect/disconnect with the real SDK transport | ✅ | `payload_link` test; on a VIO, repeated connects; disconnect < 2 s with a silent peer (SDK patch) |
-| 4 | Meaningful connection/protocol status | ✅ | Socket open → bytes → valid MAVLink → heartbeat → stale, from observed traffic only |
-| 5 | Controls send verified commands through the SDK | ✅ VIO | Frames checked byte for byte (`payload_control` test); ACKs and telemetry on a VIO (`hw_vio_commands`) |
-| 6 | Inspector shows real TX/RX from the actual path | ✅ | Observer patch on the SDK's `UDP_Port`; the SDK's own automatic traffic is visible |
-| 7 | Known messages decode correctly | ✅ | Dialect CRC and field tables; tlog verified with pymavlink; VIO values match its overlay and identity |
-| 8 | Unknown and invalid traffic handled transparently | ✅ | BAD_CRC / UNKNOWN_ID / TRUNCATED / GARBAGE kept with their raw bytes (`mavlink_frame` test) |
-| 9 | Filter, inspect frames, export logs | ✅ | Filters, details, hex view; CSV, JSON Lines, and tlog export and recording |
-| 10 | Watcher does not block the UI or control traffic | ✅ | Bounded queues; parsing on the GUI timer; files on a writer thread; video and capture on their own threads |
-| 11 | Disconnected hardware and unsupported features handled safely | ✅ | Controls disabled while disconnected; profile-driven options; OFF needs confirmation |
-| 12 | Automated tests for parsing, connection, logging | ✅ | 10 CTest programs, hardware-free |
-| 13 | README covers dependencies, build, configuration, operation, testing, limitations | ✅ | This file |
-
-## Known limitations
-
-- **Partly tested on hardware:** gimbal OFF, RESET and MAPPING (now through the flags), photo capture, and
-  recording have not been run on a VIO. Move to angle does not work on VIO software 3.1.8.21, and tracking was
-  last verified on 3.1.4.18.
-- **Payload models (see *Supported payloads*):** only VIO was run on hardware. ZIO, MB1 and OrusL come only
-  from their SDK headers and are untested. Their parameter IDs, values, tracking and control source still need
-  a real unit.
-  - **Not exposed:** zoom to an absolute level (`setCameraZoomTarget`, a custom `MAV_CMD_USER_4`), because its
-    range is not documented per model.
-- **Not run on hardware:** object detection, stream and FOV telemetry, IR FFC, one-push white balance and gimbal
-  settings are tested only against the fake payload. A detected box cannot be sent to the tracker yet, and stream
-  settings, standby, restart, SpotAE and GPS forwarding are not built. See `docs/DEVELOPMENT_PROGRESS.md`.
-- **Live network capture:** checked only for its error path here (no root under WSL). The decoding
-  and file path are tested with `.pcap` files written by libpcap.
-- **Video:** there is no recording or snapshot from the app (use the payload's own recording).
-  Under WSL2 NAT only TCP transport works.
-- **Loading recordings:** `.pcap` files load into the inspector, but the app's own `.tlog` /
-  `.jsonl` recordings do not (open them with pymavlink or a JSON tool). There is no time-range
-  filter.
-- **WSL2 networking:** NAT worked for the VIO over USB-C. If replies from a payload do not arrive,
-  enable mirrored networking by adding `networkingMode=mirrored` to `%UserProfile%\.wslconfig`,
-  then run `wsl --shutdown`.
-- **SDK `checkPayloadConnection()`** blocks forever. The app does not call it; it judges link state
-  from the traffic it observes.
-- **Licence:** the PayloadSDK is GPL-3.0. Distributing this app requires releasing it under
-  GPL-3.0.
+| [docs/USER_GUIDE.md](docs/USER_GUIDE.md) | Every screen and control, command states, the inspector, video, gamepad |
+| [docs/HARDWARE_RESULTS.md](docs/HARDWARE_RESULTS.md) | What was measured on a real VIO, and its firmware quirks |
+| [docs/DEVELOPMENT_PROGRESS.md](docs/DEVELOPMENT_PROGRESS.md) | Feature status, acceptance checklist, open hardware checks, known limitations, test log |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Source layout, design decisions, SDK patches, threads and data paths |
+| [docs/INSTALL_UBUNTU.md](docs/INSTALL_UBUNTU.md), [docs/INSTALL_WINDOWS.md](docs/INSTALL_WINDOWS.md) | Install, connect a VIO, run the hardware checks |
+| [docs/TESTING.md](docs/TESTING.md) | The test suite, soak and memory checks, troubleshooting |
+| [docs/SDK_FEATURE_MATRIX.md](docs/SDK_FEATURE_MATRIX.md) | Every PayloadSDK API and model, and what the app covers |
+| [docs/API_INTEGRATION.md](docs/API_INTEGRATION.md) | Exact calls behind the newer features, and what is not built and why |
+| [docs/KLV_STREAM.md](docs/KLV_STREAM.md) | RTP/TS settings and the KLV tags |
+| [CHANGELOG.md](CHANGELOG.md) | Changes by date |
+
+## Licence
+
+The PayloadSDK (`third_party/PayloadSdk`, a submodule) is GPL-3.0, so distributing this app requires releasing it under
+GPL-3.0.

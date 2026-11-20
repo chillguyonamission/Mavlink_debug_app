@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=MAVLink Debug App
+Comment=Gremsy payload control, MAVLink inspection and diagnostics
+Exec=mavlink_debug_app
+Icon=mavlink-debug-app
+Categories=Development;Network;
+Terminal=false

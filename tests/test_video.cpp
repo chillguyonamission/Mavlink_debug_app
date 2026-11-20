@@ -2,19 +2,26 @@
 // GLib/gio headers first: they use "signals" as an identifier, which Qt defines as a macro.
 #include <gst/rtsp-server/rtsp-server.h>
 
+#include "klv_receiver.h"
 #include "video_page.h"
 #include "video_player.h"
 
+#include <QComboBox>
 #include <QDir>
 #include <QLineEdit>
 #include <QPushButton>
 #include <QtTest>
+
+#include <thread>
 
 class TestVideo : public QObject
 {
     Q_OBJECT
     GstRTSPServer *m_server = nullptr;
     guint m_sourceId = 0;
+    GMainContext *m_ctx = nullptr;  // the server's own loop: Qt's event loop runs GLib's default context only on Linux
+    GMainLoop *m_loop = nullptr;
+    std::thread m_loopThread;
     QString m_url;
 
 private slots:
@@ -30,15 +37,24 @@ private slots:
                                              "! openh264enc ! rtph264pay name=pay0 pt=96 config-interval=1 )");
         gst_rtsp_media_factory_set_shared(f, TRUE);
         gst_rtsp_mount_points_add_factory(gst_rtsp_server_get_mount_points(m_server), "/payload", f);
-        m_sourceId = gst_rtsp_server_attach(m_server, nullptr);  // default GLib context, which Qt's event loop runs
+        m_ctx = g_main_context_new();
+        m_loop = g_main_loop_new(m_ctx, FALSE);
+        m_sourceId = gst_rtsp_server_attach(m_server, m_ctx);
         QVERIFY(m_sourceId);
+        m_loopThread = std::thread(g_main_loop_run, m_loop);
         m_url = QStringLiteral("rtsp://127.0.0.1:%1/payload").arg(gst_rtsp_server_get_bound_port(m_server));
     }
 
     void cleanupTestCase()
     {
-        if (m_sourceId) g_source_remove(m_sourceId);
+        if (m_loopThread.joinable()) {
+            g_main_loop_quit(m_loop);
+            m_loopThread.join();
+        }
+        if (m_sourceId) g_source_destroy(g_main_context_find_source_by_id(m_ctx, m_sourceId));
         g_object_unref(m_server);
+        g_main_loop_unref(m_loop);
+        g_main_context_unref(m_ctx);
     }
 
     void urlValidation()
@@ -124,6 +140,26 @@ private slots:
         QVERIFY(!url->isEnabled());
         page.findChild<QPushButton *>(QStringLiteral("videoStartStop"))->click();
         QCOMPARE(page.player()->state(), VideoPlayer::State::Stopped);
+    }
+
+    // RTSP remains the default source and runs alone: the KLV receiver stays stopped throughout.
+    void rtspSourceLeavesTheKlvReceiverStopped()
+    {
+        QStandardPaths::setTestModeEnabled(true);
+        QCoreApplication::setOrganizationName(QStringLiteral("GremsyTest"));
+        QSettings().remove(QStringLiteral("video"));
+        VideoPage page;
+        auto *source = page.findChild<QComboBox *>(QStringLiteral("videoSource"));
+        QCOMPARE(source->currentIndex(), 0);
+        page.findChild<QLineEdit *>(QStringLiteral("rtspUrl"))->setText(m_url);
+        page.findChild<QPushButton *>(QStringLiteral("videoStartStop"))->click();
+        QTRY_COMPARE_WITH_TIMEOUT(page.player()->state(), VideoPlayer::State::Playing, 10000);
+        QVERIFY(!source->isEnabled());
+        QVERIFY(!page.klvReceiver()->isRunning());
+        QCOMPARE(page.klvReceiver()->state(), KlvReceiver::State::Stopped);
+        page.findChild<QPushButton *>(QStringLiteral("videoStartStop"))->click();
+        QCOMPARE(page.player()->state(), VideoPlayer::State::Stopped);
+        QVERIFY(source->isEnabled());
     }
 
     // The main window moves the settings panel into its drawer, which is destroyed first: closing the app while

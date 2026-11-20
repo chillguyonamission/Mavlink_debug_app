@@ -161,11 +161,12 @@ const PayloadProfile &vioProfile()
              {{PAYLOAD_LRF_MODE_OFF, "Off"}, {PAYLOAD_LRF_MODE_1HZ, "1 Hz"}, {PAYLOAD_LRF_MODE_4HZ, "4 Hz"},
               {PAYLOAD_LRF_MODE_10HZ, "10 Hz"}}},
         },
-        // Not in vio_sdk.h: from the payload's own camera definition (vio_camera_g1_def.xml, software 3.1.8.21).
         // With Autopilot, the VIO drops this app's GIMBAL_DEVICE_SET_ATTITUDE (mode flags and rates).
-        "GB_FW_FLAG",
-        {{0, "Autopilot"}, {1, "Onboard computer"}, {2, "SBUS Convert"}},
-        1,
+        PAYLOAD_CAMERA_GIMBAL_FW_FLAG,
+        {{PAYLOAD_CAMERA_GIMBAL_FW_FLAG_AUTOPILOT, "Autopilot"},
+         {PAYLOAD_CAMERA_GIMBAL_FW_FLAG_ONBOARD_COMPUTER, "Onboard computer"},
+         {PAYLOAD_CAMERA_GIMBAL_FW_FLAG_SBUS_CONVERT, "SBUS Convert"}},
+        PAYLOAD_CAMERA_GIMBAL_FW_FLAG_ONBOARD_COMPUTER,
     };
     return p;
 }

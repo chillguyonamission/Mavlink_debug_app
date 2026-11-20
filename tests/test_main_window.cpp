@@ -10,6 +10,9 @@
 #include "video_player.h"
 
 #include <QApplication>
+#include <QWheelEvent>
+
+#include <algorithm>
 #include <QComboBox>
 #include <QDialog>
 #include <QDoubleSpinBox>
@@ -39,6 +42,7 @@ private slots:
     void initTestCase()
     {
         QStandardPaths::setTestModeEnabled(true);  // QSettings go to a test location
+        qputenv("MAVLINK_DEBUG_NO_GAMEPAD", "1");  // a pad plugged into this PC would send gimbal rates mid-test
         QCoreApplication::setOrganizationName(QStringLiteral("GremsyTest"));
         QSettings().clear();  // e.g. the model a previous run connected with
         applyTheme(*qApp);  // screenshots show the real look
@@ -218,6 +222,55 @@ private slots:
             return f.msgid == MAVLINK_MSG_ID_GIMBAL_DEVICE_SET_ATTITUDE && mavlink_msg_gimbal_device_set_attitude_get_angular_velocity_y(&f.msg) == 0;
         }));
 
+        // Gamepad: full left stick up = the slider's speed, centred = zero rate; right stick up = zoom tele, centred = stop
+        auto *gimbal = w.findChild<GimbalPage *>();
+        QVERIFY(gimbal);
+        GamepadConfig pad;  // the default assignment
+        GamepadState idle;
+        idle.connected = true;
+        GamepadState stick = idle;
+        stick[PadChannel::LY] = 1;
+        gimbal->gamepad(gamepadOutput(pad, idle, stick));
+        QVERIFY(sent([](const MavFrame &f) {
+            return f.msgid == MAVLINK_MSG_ID_GIMBAL_DEVICE_SET_ATTITUDE &&
+                   std::abs(mavlink_msg_gimbal_device_set_attitude_get_angular_velocity_y(&f.msg) - float(30 * M_PI / 180)) < 1e-4f;
+        }));
+        fake.received();
+        gimbal->gamepad(gamepadOutput(pad, stick, idle));
+        QVERIFY(sent([](const MavFrame &f) {
+            return f.msgid == MAVLINK_MSG_ID_GIMBAL_DEVICE_SET_ATTITUDE && mavlink_msg_gimbal_device_set_attitude_get_angular_velocity_y(&f.msg) == 0;
+        }));
+        auto zoomCmd = [](const MavFrame &f, float value) {
+            return f.msgid == MAVLINK_MSG_ID_COMMAND_LONG && mavlink_msg_command_long_get_command(&f.msg) == MAV_CMD_SET_CAMERA_ZOOM &&
+                   mavlink_msg_command_long_get_param1(&f.msg) == ZOOM_TYPE_CONTINUOUS && mavlink_msg_command_long_get_param2(&f.msg) == value;
+        };
+        stick = idle;
+        stick[PadChannel::RY] = 0.8;
+        camera->gamepad(gamepadOutput(pad, idle, stick));
+        QVERIFY(sent([&](const MavFrame &f) { return zoomCmd(f, 1); }));
+        camera->gamepad(gamepadOutput(pad, stick, idle));
+        QVERIFY(sent([&](const MavFrame &f) { return zoomCmd(f, 0); }));
+        // A reassigned channel: LB to Zoom tele, as in the document's example, sends the tele end of the range
+        QVERIFY(pad.assign(PadChannel::LB, PadFunction::ZoomTele));
+        stick = idle;
+        stick[PadChannel::LB] = 1;
+        camera->gamepad(gamepadOutput(pad, idle, stick));
+        QVERIFY(sent([](const MavFrame &f) {
+            return f.msgid == MAVLINK_MSG_ID_COMMAND_LONG && mavlink_msg_command_long_get_command(&f.msg) == MAV_CMD_SET_CAMERA_ZOOM &&
+                   mavlink_msg_command_long_get_param1(&f.msg) == ZOOM_TYPE_RANGE && mavlink_msg_command_long_get_param2(&f.msg) == 100;
+        }));
+        // RB while the gimbal reports LOCK: FOLLOW (mode flags 0, no angle)
+        GamepadState rb = idle;
+        rb[PadChannel::RB] = 1;
+        fake.received();
+        gimbal->gamepad(gamepadOutput(pad, idle, rb));
+        QVERIFY(sent([](const MavFrame &f) {
+            if (f.msgid != MAVLINK_MSG_ID_GIMBAL_DEVICE_SET_ATTITUDE) return false;
+            float q[4];
+            mavlink_msg_gimbal_device_set_attitude_get_q(&f.msg, q);
+            return std::isnan(q[0]) && mavlink_msg_gimbal_device_set_attitude_get_flags(&f.msg) == 0;
+        }));
+
         // Mode buttons: the mode flags in GIMBAL_DEVICE_SET_ATTITUDE (the gimbal reported LOCK above), no angle
         QVERIFY(buttonText(QStringLiteral("LOCK"))->property("active").toBool());
         buttonText(QStringLiteral("FOLLOW"))->click();
@@ -264,24 +317,59 @@ private slots:
         for (QPushButton *b : w.findChildren<QPushButton *>())
             if (b->text().contains(QStringLiteral("All camera settings"))) all = b;
         QVERIFY(all && all->isEnabled());
+        w.resize(1440, 900);
+        QTest::qWait(50);
+        const int windowWidth = w.width();
+        auto *videoView = w.findChild<VideoPage *>()->view();
+        const int videoWidth = videoView->width();
+        auto *monitor = w.findChild<InspectorWidget *>();
+        QVERIFY(monitor->isVisible());
+        const int monitorHeight = monitor->height();
+        auto *settings = w.findChild<CameraSettingsPage *>();
+        QVERIFY(settings && !settings->isVisible());
         all->click();
-        auto *dialog = w.findChild<QDialog *>();
-        QVERIFY(dialog && dialog->isVisible());
+        QVERIFY(settings->isVisible());
+        QCoreApplication::processEvents();
+        // Under the video, not over it: the same width, a 16:9 picture at least 300 px tall, and the window does not grow
+        QTest::qWait(50);
+        QCOMPARE(videoView->width(), videoWidth);
+        QVERIFY2(std::min(double(videoView->height()), videoView->width() * 9.0 / 16) >= 300, qPrintable(QString::number(videoView->height())));
+        QVERIFY(w.findChild<GimbalPage *>()->isVisible() && w.findChild<CameraPage *>()->isVisible() && !monitor->isVisible());
+        QVERIFY(videoView->isVisible() && !videoView->visibleRegion().isEmpty());
+        QCOMPARE(w.width(), windowWidth);
+        QVERIFY(!QRect(videoView->mapTo(&w, QPoint()), videoView->size()).intersects(QRect(settings->mapTo(&w, QPoint()), settings->size())));
         QComboBox *wb = nullptr;
-        for (QComboBox *c : dialog->findChildren<QComboBox *>())
+        for (QComboBox *c : settings->findChildren<QComboBox *>())
             if (c->findText(QStringLiteral("ATW (auto tracing)")) >= 0) wb = c;
         QVERIFY(wb);
         QTRY_COMPARE_WITH_TIMEOUT(wb->currentText(), QStringLiteral("Outdoor"), 3000);
-        bool listRequested = false;  // opening the dialog reads every setting
+        bool listRequested = false;  // opening the panel reads every setting
         QTRY_VERIFY_WITH_TIMEOUT([&] {
             for (const MavFrame &f : fake.received()) listRequested |= f.msgid == MAVLINK_MSG_ID_PARAM_EXT_REQUEST_LIST;
             return listRequested;
         }(), 3000);
         if (const QByteArray dir = qgetenv("SCREENSHOT_DIR"); !dir.isEmpty()) {
             QTest::qWait(300);
-            dialog->grab().save(QString::fromLocal8Bit(dir) + QStringLiteral("/camera_settings.png"));
+            w.grab().save(QString::fromLocal8Bit(dir) + QStringLiteral("/camera_settings.png"));
         }
-        dialog->close();
+        // The wheel over a combo in the panel scrolls: it must not change the setting or send anything
+        const QPoint wbCentre = wb->rect().center();
+        const auto paramSets = [&] {
+            int n = 0;
+            for (const MavFrame &f : fake.received()) n += f.msgid == MAVLINK_MSG_ID_PARAM_EXT_SET;
+            return n;
+        };
+        const int setsBefore = paramSets();
+        const QString wbBefore = wb->currentText();
+        QWheelEvent wheel(QPointF(wbCentre), QPointF(wb->mapToGlobal(wbCentre)), {}, QPoint(0, -120), Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
+        QApplication::sendEvent(wb, &wheel);
+        QTest::qWait(200);
+        QCOMPARE(wb->currentText(), wbBefore);
+        QCOMPARE(paramSets(), setsBefore);
+        all->click();
+        QVERIFY(!settings->isVisible() && monitor->isVisible());
+        QTest::qWait(50);
+        QCOMPARE(monitor->height(), monitorHeight);
 
         if (const QByteArray dir = qgetenv("SCREENSHOT_DIR"); !dir.isEmpty()) {
             w.resize(1440, 900);
@@ -681,11 +769,11 @@ private slots:
                 if (b->text().contains(QStringLiteral("All camera settings"))) all = b;
             QVERIFY(all && all->isEnabled());
             all->click();
-            auto *dialog = camera->findChild<QDialog *>();
-            QVERIFY(dialog);
-            auto *tabs = dialog->findChild<QTabWidget *>();
+            auto *settings = w.findChild<CameraSettingsPage *>();
+            QVERIFY(settings);
+            auto *tabs = settings->findChild<QTabWidget *>();
             QVERIFY2(tabs && tabs->count() >= 2, qPrintable(model->currentText()));
-            dialog->close();
+            all->click();
             // Controls follow the profile, and a disabled one says why
             const PayloadProfile &p = profileByName(model->currentText());
             for (const auto &[text, supported] : {std::pair{"FFC auto", p.irFfc}, {"FFC manual", p.irFfc}, {"Trigger FFC", p.irFfc}, {"WB one push", p.wbOnePush},
@@ -696,6 +784,9 @@ private slots:
                 QCOMPARE(b->isEnabled(), supported);
                 QCOMPARE(b->toolTip().contains(QStringLiteral("Not supported")), !supported);
             }
+            int bitrateRows = 0;  // a row with the presets: an unsupported one has only its "not supported" item
+            for (QComboBox *c : camera->findChildren<QComboBox *>()) bitrateRows += c->findText(QStringLiteral("0.512 Mbit/s")) > 0;
+            QCOMPARE(bitrateRows, p.irPaletteId ? 2 : 1);
         }
 
         model->setCurrentText(QStringLiteral("ZIO"));
@@ -743,19 +834,22 @@ private slots:
         QTest::qWait(4000);  // info replies and parameter streams
         shootViews(w, QString::fromLocal8Bit(dir), QStringLiteral("hw_"));
 
-        // Camera settings dialog with the camera's values (opening it only reads)
-        for (QPushButton *b : w.findChildren<QPushButton *>()) if (b->text().contains(QStringLiteral("All camera settings"))) b->click();
-        auto *dialog = w.findChild<QDialog *>();
-        QVERIFY(dialog);
+        // Camera settings panel with the camera's values (opening it only reads)
+        QPushButton *allSettings = nullptr;
+        for (QPushButton *b : w.findChildren<QPushButton *>()) if (b->text().contains(QStringLiteral("All camera settings"))) allSettings = b;
+        QVERIFY(allSettings);
+        allSettings->click();
+        auto *settings = w.findChild<CameraSettingsPage *>();
+        QVERIFY(settings);
         QTRY_VERIFY_WITH_TIMEOUT(w.link()->telemetry().cameraParams().size() >= 40, 5000);
         QTest::qWait(500);
-        auto *tabs = dialog->findChild<QTabWidget *>();
+        auto *tabs = settings->findChild<QTabWidget *>();
         for (int i = 0; i < tabs->count(); ++i) {
             tabs->setCurrentIndex(i);
             QTest::qWait(400);
-            dialog->grab().save(QString::fromLocal8Bit(dir) + QStringLiteral("/hw_camera_settings_%1.png").arg(i));
+            w.grab().save(QString::fromLocal8Bit(dir) + QStringLiteral("/hw_camera_settings_%1.png").arg(i));
         }
-        dialog->close();
+        allSettings->click();
 
         // HW_TRACK=1 also tracks the picture centre (approved: the gimbal may move a little) to compare the HUD box
         // with the box the camera's own OSD draws
